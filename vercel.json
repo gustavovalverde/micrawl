@@ -1,0 +1,17 @@
+{
+  "functions": {
+    "api/index.ts": {
+      "maxDuration": 60,
+      "memory": 3072
+    }
+  },
+  "env": {
+    "SCRAPER_DEFAULT_TIMEOUT_MS": "45000",
+    "SCRAPER_TEXT_ONLY_DEFAULT": "true",
+    "SCRAPER_MAX_URLS_PER_REQUEST": "5",
+    "SCRAPER_DEFAULT_LOCALE": "en-US",
+    "SCRAPER_DEFAULT_TIMEZONE": "America/New_York",
+    "SCRAPER_DEFAULT_VIEWPORT_WIDTH": "1920",
+    "SCRAPER_DEFAULT_VIEWPORT_HEIGHT": "1080"
+  }
+}

@@ -1,5 +1,7 @@
 # Micrawl Scraper Service
 
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fyour-username%2Fmicro-play&env=SCRAPER_DEFAULT_TIMEOUT_MS,SCRAPER_TEXT_ONLY_DEFAULT,SCRAPER_MAX_URLS_PER_REQUEST&envDescription=Configure%20the%20scraper%20service&envLink=https%3A%2F%2Fgithub.com%2Fyour-username%2Fmicro-play%23configuration&project-name=micrawl-scraper&repository-name=micrawl-scraper)
+
 A serverless-friendly scraper API that accepts a list of URLs, runs Playwright against each one, and streams the results back as newline-delimited JSON (NDJSON). The request stays synchronous, but you get per-URL feedback as soon as each scrape completes.
 
 ## Table of Contents
@@ -22,7 +24,7 @@ A serverless-friendly scraper API that accepts a list of URLs, runs Playwright a
     - [Testing](#testing)
     - [Manual smoke test](#manual-smoke-test)
   - [Configuration](#configuration)
-  - [Roadmap & Known Gaps](#roadmap--known-gaps)
+  - [Roadmap \& Known Gaps](#roadmap--known-gaps)
   - [Project Layout](#project-layout)
 
 ## Overview
