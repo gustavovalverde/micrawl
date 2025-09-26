@@ -97,6 +97,13 @@ const resolveChromiumExecutablePath = async (): Promise<string | null> => {
   return executablePath;
 };
 
+/**
+ * Launch a Chromium browser suited for the current environment.
+ *
+ * The serverless runtime penalises per-request cold starts, so we launch once
+ * and reuse the instance via {@link getBrowser}. On disconnect we drop the
+ * cached promise so future calls can recreate the browser.
+ */
 const launchBrowser = async (): Promise<Browser> => {
   const executablePath = await resolveChromiumExecutablePath();
   const launchOptions: Parameters<typeof playwrightChromium.launch>[0] = {
@@ -116,6 +123,14 @@ const launchBrowser = async (): Promise<Browser> => {
   return browserInstance;
 };
 
+/**
+ * Lazily retrieve a shared Chromium browser instance.
+ *
+ * Reusing the browser across jobs within the same invocation avoids
+ * multi-second startup costs and helps stay within execution ceilings.
+ * The promise guards against concurrent launch calls while still
+ * surfacing the original error when Chromium fails to start.
+ */
 const getBrowser = async (): Promise<Browser> => {
   if (!cachedBrowserPromise) {
     cachedBrowserPromise = launchBrowser().catch((error) => {
@@ -145,6 +160,14 @@ const mapErrorToPageError = (error: unknown): string => {
   return message;
 };
 
+/**
+ * Execute a single scrape job and return either a success payload or a
+ * structured failure.
+ *
+ * The function favours early exits and progressive streaming so consumers can
+ * render progress in real time. It deliberately avoids closing the shared
+ * browser, only disposing per-job contexts/pages.
+ */
 export const runScrapeJob = async (
   job: ScrapeJob,
   jobId: string,
@@ -226,6 +249,30 @@ export const runScrapeJob = async (
       timeout: job.timeoutMs,
     });
     httpStatusCode = response?.status();
+
+    const readinessTimeout = Math.min(job.timeoutMs, 10_000);
+
+    // Waiting for <body> and a network-idle window gives most SPAs enough time
+    // to populate content while still respecting the caller's timeout budget.
+    try {
+      await page.waitForSelector("body", { timeout: readinessTimeout });
+    } catch (error) {
+      logger.info("Timed out waiting for <body> during scrape", {
+        jobId,
+        targetUrl: job.targetUrl,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    try {
+      await page.waitForLoadState("networkidle", { timeout: readinessTimeout });
+    } catch (error) {
+      logger.info("Timed out waiting for network idle during scrape", {
+        jobId,
+        targetUrl: job.targetUrl,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
 
     // Wait for selector if specified
     if (job.waitForSelector) {
@@ -357,22 +404,26 @@ export const runScrapeJob = async (
   return failureEnvelope;
 };
 
+/**
+ * Lightweight readiness probe that proves Chromium, context creation, and
+ * basic navigation still work in the current environment.
+ */
 export const verifyChromiumLaunch = async () => {
-  const executablePath = await resolveChromiumExecutablePath();
+  const browser = await getBrowser();
+  const context = await browser.newContext();
+  const page = await context.newPage();
 
-  const launchOptions: Parameters<typeof playwrightChromium.launch>[0] = {
-    headless: true,
-  };
-
-  if (executablePath) {
-    launchOptions.executablePath = executablePath;
-    launchOptions.args = chromium.args;
+  try {
+    await page.goto("data:text/html,Micrawl health", {
+      waitUntil: "load",
+      timeout: 3_000,
+    });
+    await page.waitForSelector("body", { timeout: 3_000 }).catch(() => {});
+  } finally {
+    try {
+      await page.close();
+    } finally {
+      await context.close();
+    }
   }
-
-  const browser = await playwrightChromium.launch(launchOptions);
-
-  const page = await browser.newPage();
-  await page.goto("about:blank");
-  await page.close();
-  await browser.close();
 };

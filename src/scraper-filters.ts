@@ -35,6 +35,11 @@ export const ANALYTICS_AND_AD_DOMAINS = [
   ".amazon-adsystem.",
 ];
 
+/**
+ * Resource types that don’t materially affect scraping results but consume
+ * bandwidth/time. Keeping them in a shared set allows routing logic and tests
+ * to stay in sync.
+ */
 const RESOURCE_TYPES_TO_SKIP = new Set<string>([
   "image",
   "media",
@@ -42,6 +47,10 @@ const RESOURCE_TYPES_TO_SKIP = new Set<string>([
   "stylesheet",
 ]);
 
+/**
+ * Return true when the URL’s extension is in the block list. We parse once and
+ * share the logic across initial target validation and request interception.
+ */
 export const isBlockedExtension = (url: URL): boolean => {
   const pathname = url.pathname;
   const dotIndex = pathname.lastIndexOf(".");
@@ -53,8 +62,16 @@ export const isBlockedExtension = (url: URL): boolean => {
   return DISALLOWED_FILE_EXTENSIONS.has(extension);
 };
 
+/**
+ * Return true when the hostname matches any of the analytics/ads fragments we
+ * strip out to keep pages leaner and faster.
+ */
 export const isBlockedDomain = (hostname: string): boolean =>
   ANALYTICS_AND_AD_DOMAINS.some((pattern) => hostname.includes(pattern));
 
+/**
+ * Mirror the extension/domain helpers with a resource-type predicate so callers
+ * don’t switch mental models when filtering requests.
+ */
 export const shouldSkipResourceType = (resourceType: string): boolean =>
-  RESOURCE_TYPES_TO_SKIP.has(resourceType);
+  RESOURCE_TYPES_TO_SKIP.has(resourceType.toLowerCase());
