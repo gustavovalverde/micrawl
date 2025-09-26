@@ -1,5 +1,9 @@
 import { z } from "zod";
 
+/**
+ * Accept common textual boolean representations so collaborators can set env
+ * vars without memorising exact casing.
+ */
 const booleanLike = z
   .string()
   .trim()
@@ -12,6 +16,10 @@ const booleanLike = z
 
 const booleanFromEnv = z.boolean().or(booleanLike);
 
+/**
+ * Central definition of runtime settings. Defaults mirror the README examples
+ * to minimise surprises when deploying to Vercel or running locally.
+ */
 const envSchema = z
   .object({
     NODE_ENV: z

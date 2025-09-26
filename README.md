@@ -23,9 +23,10 @@ A serverless-friendly scraper API that accepts a list of URLs, runs Playwright a
   - [Development Workflow](#development-workflow)
     - [Testing](#testing)
     - [Manual smoke test](#manual-smoke-test)
-  - [Configuration](#configuration)
-  - [Roadmap \& Known Gaps](#roadmap--known-gaps)
-  - [Project Layout](#project-layout)
+- [Configuration](#configuration)
+- [Roadmap \& Known Gaps](#roadmap--known-gaps)
+- [Project Layout](#project-layout)
+- [Code Map](#code-map)
 
 ## Overview
 
@@ -250,5 +251,22 @@ src/
   types/        # Shared scraper domain types
 api/index.ts    # Vercel entrypoint exporting Hono app
 ```
+
+## Code Map
+
+- `createApp()` (`src/index.ts`) wires the logging middleware, routes, and the
+  shared-browser shutdown hook. Runtime signals are routed through
+  `closeSharedBrowser()` so local runs don’t leak Chromium.
+- `registerRoutes()` (`src/routes.ts`) validates payloads with the schema in
+  `scrapeRequestSchema` and streams each result from `runScrapeJob()`. The
+  streamed summary is computed in the same loop so clients never wait for
+  post-processing.
+- `runScrapeJob()` (`src/scraper.ts`) owns all Playwright orchestration. It
+  consults the helpers in `src/scraper-filters.ts` before navigation, reuses the
+  cached browser from `getBrowser()`, and surfaces failures through the typed
+  envelopes in `src/types/scrape.ts`.
+- `tests/routes.*.test.ts` mock only the scraper entry points—if a new helper is
+  exported from `src/scraper.ts` (e.g. the shutdown helper), remember to add it
+  to the mocks so integration tests continue to isolate route logic.
 
 Questions? Open an issue or reach out to the maintainer.

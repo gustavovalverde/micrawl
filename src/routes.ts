@@ -33,6 +33,11 @@ const viewportSchema = z
   })
   .optional();
 
+/**
+ * Shape of the `/scrape` payload. Defaults favour the lightweight development
+ * experience described in `README.md` and keep validation alongside the route
+ * so future additions only touch this file.
+ */
 export const scrapeRequestSchema = z
   .object({
     urls: z
@@ -83,6 +88,11 @@ export const buildScrapeJob = (
   headerOverrides: request.headers,
 });
 
+/**
+ * Register health and scrape routes on the provided Hono app. The streaming
+ * handler emits one JSON line per job so clients can update progress bars
+ * without buffering server-side summary work.
+ */
 export const registerRoutes = (app: Hono) => {
   app.get("/health", async (c) => {
     try {
@@ -158,6 +168,8 @@ export const registerRoutes = (app: Hono) => {
             if (record.status === "success") {
               summary.succeeded += 1;
               succeededCount += 1;
+              // Attach running totals so consumers can render progress without
+              // recalculating on the client.
               const enriched = {
                 ...record,
                 progress: {
