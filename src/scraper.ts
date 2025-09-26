@@ -65,7 +65,7 @@ export const buildExtraHeaders = (job: ScrapeJob): Record<string, string> => {
   return headers;
 };
 
-let cachedChromiumExecutablePath: string | null | undefined = undefined;
+let cachedChromiumExecutablePath: string | null | undefined;
 let cachedBrowserPromise: Promise<Browser> | null = null;
 let cachedBrowserInstance: Browser | null = null;
 
