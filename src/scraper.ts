@@ -11,6 +11,7 @@ import {
 import UserAgent from "user-agents";
 import { getEnv } from "./env.js";
 import { logger } from "./logger.js";
+import { isBlockedDomain, isBlockedExtension, shouldSkipResourceType } from "./scraper-filters.js";
 import type {
   LoadStrategy,
   ScrapedPage,
@@ -20,50 +21,6 @@ import type {
   ScrapeJob,
   ScrapeSuccess,
 } from "./types/scrape.js";
-
-const DISALLOWED_FILE_EXTENSIONS = new Set([
-  ".pdf",
-  ".zip",
-  ".rar",
-  ".7z",
-  ".tar",
-  ".gz",
-  ".bz2",
-  ".mp4",
-  ".mp3",
-  ".avi",
-  ".mov",
-  ".mkv",
-  ".flac",
-  ".wav",
-  ".woff",
-  ".woff2",
-  ".ttf",
-  ".otf",
-]);
-
-const ANALYTICS_AND_AD_DOMAINS = [
-  ".doubleclick.",
-  ".google-analytics.",
-  ".googletagmanager.",
-  ".googlesyndication.",
-  ".googletagservices.",
-  ".adservice.",
-  ".adnxs.",
-  ".ads-twitter.",
-  ".facebook.",
-  ".clarity.",
-  ".nr-data.",
-  ".bing.",
-  ".amazon-adsystem.",
-];
-
-const RESOURCE_TYPES_TO_SKIP = new Set([
-  "image",
-  "media",
-  "font",
-  "stylesheet",
-]);
 
 const generateUserAgent = () =>
   new UserAgent({ deviceCategory: "desktop" }).toString();
@@ -109,6 +66,7 @@ export const buildExtraHeaders = (job: ScrapeJob): Record<string, string> => {
 };
 
 let cachedChromiumExecutablePath: string | null | undefined = undefined;
+let cachedBrowserPromise: Promise<Browser> | null = null;
 
 const resolveChromiumExecutablePath = async (): Promise<string | null> => {
   if (cachedChromiumExecutablePath !== undefined) {
@@ -137,6 +95,36 @@ const resolveChromiumExecutablePath = async (): Promise<string | null> => {
 
   cachedChromiumExecutablePath = executablePath;
   return executablePath;
+};
+
+const launchBrowser = async (): Promise<Browser> => {
+  const executablePath = await resolveChromiumExecutablePath();
+  const launchOptions: Parameters<typeof playwrightChromium.launch>[0] = {
+    headless: true,
+  };
+
+  if (executablePath) {
+    launchOptions.executablePath = executablePath;
+    launchOptions.args = chromium.args;
+  }
+
+  const browserInstance = await playwrightChromium.launch(launchOptions);
+  browserInstance.on("disconnected", () => {
+    cachedBrowserPromise = null;
+  });
+
+  return browserInstance;
+};
+
+const getBrowser = async (): Promise<Browser> => {
+  if (!cachedBrowserPromise) {
+    cachedBrowserPromise = launchBrowser().catch((error) => {
+      cachedBrowserPromise = null;
+      throw error;
+    });
+  }
+
+  return cachedBrowserPromise;
 };
 
 const mapErrorToPageError = (error: unknown): string => {
@@ -176,7 +164,6 @@ export const runScrapeJob = async (
 
   let scrapedPage: ScrapedPage | null = null;
 
-  let browser: Browser | null = null;
   let context: BrowserContext | null = null;
   let page: Page | null = null;
   const loadStrategy: LoadStrategy = job.waitForSelector
@@ -190,46 +177,32 @@ export const runScrapeJob = async (
   let failurePageError: string | null = null;
 
   try {
-    // Check if the URL has a disallowed extension
-    const extension = new URL(job.targetUrl).pathname
-      .split(".")
-      .pop()
-      ?.toLowerCase();
-    if (extension && DISALLOWED_FILE_EXTENSIONS.has(`.${extension}`)) {
-      throw new Error(`Disallowed file extension: ${extension}`);
+    const targetUrl = new URL(job.targetUrl);
+    if (isBlockedExtension(targetUrl)) {
+      throw new Error(`Disallowed file extension: ${targetUrl.pathname}`);
     }
-
-    // Get Chromium executable path from @sparticuz/chromium
-    const executablePath = await resolveChromiumExecutablePath();
-
-    const launchOptions: Parameters<typeof playwrightChromium.launch>[0] = {
-      headless: true,
-    };
-
-    if (executablePath) {
-      launchOptions.executablePath = executablePath;
-      launchOptions.args = chromium.args;
-    }
-
-    browser = await playwrightChromium.launch(launchOptions);
 
     // Create browser context with proxy if configured
+    const browser = await getBrowser();
     const contextOptions = buildContextOptions(job);
     context = await browser.newContext(contextOptions);
 
     // Set up request interception for ads and analytics
     await context.route("**/*", (route: Route) => {
       const request = route.request();
-      const url = request.url();
+      const url = new URL(request.url());
       const resourceType = request.resourceType();
 
-      // Block analytics and ad domains
-      if (ANALYTICS_AND_AD_DOMAINS.some((domain) => url.includes(domain))) {
+      if (isBlockedDomain(url.hostname)) {
         return route.abort();
       }
 
       // Skip certain resource types
-      if (RESOURCE_TYPES_TO_SKIP.has(resourceType)) {
+      if (shouldSkipResourceType(resourceType)) {
+        return route.abort();
+      }
+
+      if (isBlockedExtension(url)) {
         return route.abort();
       }
 
@@ -336,14 +309,6 @@ export const runScrapeJob = async (
         await context.close();
       } catch (e) {
         logger.warn("Failed to close context", { error: String(e), jobId });
-      }
-    }
-
-    if (browser) {
-      try {
-        await browser.close();
-      } catch (e) {
-        logger.warn("Failed to close browser", { error: String(e), jobId });
       }
     }
   }
