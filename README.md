@@ -212,6 +212,10 @@ curl -N \
   http://localhost:3000/scrape
 ```
 
+`Ctrl+C` cleanly stops the dev server: the SIGINT handler closes the shared
+Chromium instance before the process exits, so you won’t end up with orphaned
+browser processes between runs.
+
 ## Configuration
 
 All environment variables are documented and validated in `src/env.ts`:

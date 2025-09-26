@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { logger } from "./logger.js";
 import { registerRoutes } from "./routes.js";
+import { closeSharedBrowser } from "./scraper.js";
 
 export const createApp = () => {
   const app = new Hono();
@@ -29,5 +30,20 @@ export const createApp = () => {
 };
 
 const app = createApp();
+
+/**
+ * Gracefully tear down shared resources on shutdown signals. Avoid calling
+ * `process.exit` while running under Vitest so the test runner can complete.
+ */
+const handleShutdown = async (signal: NodeJS.Signals) => {
+  logger.info("Received shutdown signal", { signal });
+  await closeSharedBrowser();
+  if (!process.env.VITEST) {
+    process.exit(0);
+  }
+};
+
+process.once("SIGINT", handleShutdown);
+process.once("SIGTERM", handleShutdown);
 
 export default app;

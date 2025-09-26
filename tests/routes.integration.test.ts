@@ -7,6 +7,7 @@ vi.mock("../src/scraper.js", () => ({
   verifyChromiumLaunch: vi.fn(),
   buildContextOptions: vi.fn(),
   buildExtraHeaders: vi.fn(),
+  closeSharedBrowser: vi.fn().mockResolvedValue(undefined),
 }));
 
 // Import after mocking

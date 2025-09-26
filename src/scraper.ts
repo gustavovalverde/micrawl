@@ -67,6 +67,7 @@ export const buildExtraHeaders = (job: ScrapeJob): Record<string, string> => {
 
 let cachedChromiumExecutablePath: string | null | undefined = undefined;
 let cachedBrowserPromise: Promise<Browser> | null = null;
+let cachedBrowserInstance: Browser | null = null;
 
 const resolveChromiumExecutablePath = async (): Promise<string | null> => {
   if (cachedChromiumExecutablePath !== undefined) {
@@ -116,8 +117,10 @@ const launchBrowser = async (): Promise<Browser> => {
   }
 
   const browserInstance = await playwrightChromium.launch(launchOptions);
+  cachedBrowserInstance = browserInstance;
   browserInstance.on("disconnected", () => {
     cachedBrowserPromise = null;
+    cachedBrowserInstance = null;
   });
 
   return browserInstance;
@@ -425,5 +428,24 @@ export const verifyChromiumLaunch = async () => {
     } finally {
       await context.close();
     }
+  }
+};
+
+/**
+ * Close the shared Chromium browser if one is active.
+ */
+export const closeSharedBrowser = async () => {
+  const browser = cachedBrowserInstance;
+  cachedBrowserInstance = null;
+  cachedBrowserPromise = null;
+
+  if (!browser) return;
+
+  try {
+    await browser.close();
+  } catch (error) {
+    logger.warn("Failed to close shared browser", {
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 };
