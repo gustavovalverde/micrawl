@@ -1,0 +1,29 @@
+{
+  "name": "micrawl",
+  "type": "module",
+  "packageManager": "pnpm@10.17.1",
+  "scripts": {
+    "test": "vitest run",
+    "test:unit": "vitest run **/*.test.ts",
+    "test:integration": "vitest run **/*.integration.test.ts",
+    "test:e2e": "RUN_E2E=true vitest run tests/routes.e2e.test.ts",
+    "test:types": "tsc --noEmit",
+    "test:all": "pnpm test:types && pnpm test"
+  },
+  "dependencies": {
+    "@hono/zod-validator": "^0.7.3",
+    "@sparticuz/chromium": "^138.0.2",
+    "hono": "^4.9.8",
+    "playwright-core": "^1.55.1",
+    "user-agents": "^1.1.664",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.2.4",
+    "@types/node": "^20.19.17",
+    "@vitest/ui": "^3.2.4",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}
