@@ -72,4 +72,7 @@ export const getEnv = (): Env => {
   return cachedEnv;
 };
 
+/**
+ * Cheap way to branch on behaviour without re-parsing the environment.
+ */
 export const isProduction = () => getEnv().NODE_ENV === "production";

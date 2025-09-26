@@ -109,6 +109,9 @@ export const registerRoutes = (app: Hono) => {
     "/scrape",
     zValidator("json", scrapeRequestSchema, (result, c) => {
       if (!result.success) {
+        // We keep validation errors close to the route so the API returns a
+        // compact payload instead of leaking Zod's verbose structure to
+        // clients.
         return c.json(
           {
             ok: false,
@@ -154,47 +157,39 @@ export const registerRoutes = (app: Hono) => {
         let succeededCount = 0;
         let failedCount = 0;
 
-        let sequence = 0;
+        for (const [jobIndex, job] of scrapeJobs.entries()) {
+          const sequence = jobIndex + 1;
+          const position = {
+            index: sequence,
+            total: totalJobs,
+            targetUrl: job.targetUrl,
+          } as const;
 
-        for (const job of scrapeJobs) {
-          sequence += 1;
           try {
-            const record = await runScrapeJob(job, jobId, {
-              index: sequence,
-              total: totalJobs,
-              targetUrl: job.targetUrl,
-            });
+            const record = await runScrapeJob(job, jobId, position);
 
             if (record.status === "success") {
               summary.succeeded += 1;
               succeededCount += 1;
-              // Attach running totals so consumers can render progress without
-              // recalculating on the client.
-              const enriched = {
-                ...record,
-                progress: {
-                  completed: sequence,
-                  remaining: totalJobs - sequence,
-                  succeeded: succeededCount,
-                  failed: failedCount,
-                },
-              };
-              await stream.writeln(JSON.stringify(enriched));
             } else {
               summary.failed += 1;
               failedCount += 1;
               summary.failures.push(...record.errors);
-              const enriched = {
-                ...record,
-                progress: {
-                  completed: sequence,
-                  remaining: totalJobs - sequence,
-                  succeeded: succeededCount,
-                  failed: failedCount,
-                },
-              };
-              await stream.writeln(JSON.stringify(enriched));
             }
+
+            const progress = {
+              completed: sequence,
+              remaining: totalJobs - sequence,
+              succeeded: succeededCount,
+              failed: failedCount,
+            };
+
+            await stream.writeln(
+              JSON.stringify({
+                ...record,
+                progress,
+              }),
+            );
           } catch (error) {
             const message =
               error instanceof Error ? error.message : String(error);
@@ -209,6 +204,12 @@ export const registerRoutes = (app: Hono) => {
               targetUrl: job.targetUrl,
               error: message,
             });
+            const progress = {
+              completed: sequence,
+              remaining: totalJobs - sequence,
+              succeeded: succeededCount,
+              failed: failedCount,
+            };
             const payload: ScrapeError = {
               status: "error",
               jobId,
@@ -216,12 +217,7 @@ export const registerRoutes = (app: Hono) => {
               total: totalJobs,
               targetUrl: job.targetUrl,
               message,
-              progress: {
-                completed: sequence,
-                remaining: totalJobs - sequence,
-                succeeded: succeededCount,
-                failed: failedCount,
-              },
+              progress,
             };
             await stream.writeln(JSON.stringify(payload));
           }
@@ -252,6 +248,8 @@ export const registerRoutes = (app: Hono) => {
           },
         };
 
+        // Emit the terminating summary so client loops know when to close down
+        // their streaming readers without guessing.
         await stream.writeln(JSON.stringify(summaryRecord));
       });
     },
