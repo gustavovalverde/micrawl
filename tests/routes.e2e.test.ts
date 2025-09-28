@@ -1,9 +1,21 @@
 import { testClient } from "hono/testing";
 import { beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../src/index.js";
+import type {
+  ScrapeStreamMessage,
+  ScrapeSuccess,
+  ScrapeSummary,
+} from "../src/types/scrape.js";
 
 const runE2E = process.env.RUN_E2E === "true";
 const e2eDescribe = runE2E ? describe : describe.skip;
+
+const parseStreamLines = (raw: string): ScrapeStreamMessage[] =>
+  raw
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((line: string) => JSON.parse(line) as ScrapeStreamMessage);
 
 /**
  * True E2E tests - no mocks, testing the complete system
@@ -13,6 +25,7 @@ const e2eDescribe = runE2E ? describe : describe.skip;
  */
 
 e2eDescribe("E2E: /scrape route with real browser", () => {
+  // biome-ignore lint/suspicious/noExplicitAny: test client type is dynamic
   let client: any; // Type inference doesn't work well with testClient in tests
 
   beforeAll(() => {
@@ -31,25 +44,30 @@ e2eDescribe("E2E: /scrape route with real browser", () => {
 
     expect(res.status).toBe(200);
 
-    const text = await res.text();
-    const lines = text
-      .trim()
-      .split("\n")
-      .map((line: string) => JSON.parse(line));
+    const lines = parseStreamLines(await res.text());
 
     const result = lines.find(
-      (line: any) => line.status === "success" && line.data?.page,
+      (line): line is ScrapeSuccess =>
+        line.status === "success" && "data" in line,
     );
     expect(result).toBeDefined();
-    expect(result!.targetUrl).toBe("https://example.com");
-    expect(result!.data.page.httpStatusCode).toBeGreaterThanOrEqual(200);
-    expect(result!.data.page.contents[0]?.body ?? "").toContain("Example Domain");
+    if (!result) return;
+    expect(result.targetUrl).toBe("https://example.com");
+    expect(result.data.page.httpStatusCode).toBeGreaterThanOrEqual(200);
+    expect(result.data.page.contents[0]?.body ?? "").toContain(
+      "Example Domain",
+    );
 
-    const summary = lines.find((line: any) => line.summary)!;
+    const summary = lines.find(
+      (line): line is ScrapeSummary =>
+        line.status === "success" && "summary" in line,
+    );
+    expect(summary).toBeDefined();
+    if (!summary) return;
     expect(summary.status).toBe("success");
     expect(summary.summary.succeeded).toBe(1);
     expect(summary.summary.failed).toBe(0);
-    expect(summary.progress.succeeded).toBe(1);
+    expect(summary.progress?.succeeded).toBe(1);
   }, 60000); // Allow plenty of time for remote site
 
   it("handles 404 pages correctly", async () => {
@@ -62,18 +80,16 @@ e2eDescribe("E2E: /scrape route with real browser", () => {
 
     expect(res.status).toBe(200);
 
-    const text = await res.text();
-    const lines = text
-      .trim()
-      .split("\n")
-      .map((line: string) => JSON.parse(line));
+    const lines = parseStreamLines(await res.text());
 
     const firstResult = lines.find(
-      (line: any) => line.status === "success" && line.data?.page,
+      (line): line is ScrapeSuccess =>
+        line.status === "success" && "data" in line,
     );
     expect(firstResult).toBeDefined();
-    expect(firstResult!.targetUrl).toBe("https://example.com/404");
-    expect(firstResult!.data.page.httpStatusCode).toBeGreaterThanOrEqual(400);
+    if (!firstResult) return;
+    expect(firstResult.targetUrl).toBe("https://example.com/404");
+    expect(firstResult.data.page.httpStatusCode).toBeGreaterThanOrEqual(400);
   }, 30000);
 
   it("scrapes multiple real URLs in batch", async () => {
@@ -86,26 +102,28 @@ e2eDescribe("E2E: /scrape route with real browser", () => {
 
     expect(res.status).toBe(200);
 
-    const text = await res.text();
-    const lines = text
-      .trim()
-      .split("\n")
-      .map((line: string) => JSON.parse(line));
+    const lines = parseStreamLines(await res.text());
 
-    // Should have 2 results + 1 summary
-    expect(lines).toHaveLength(3);
+    expect(lines.length).toBeGreaterThanOrEqual(3);
 
-    // Verify both URLs were scraped
-    const successLines = lines.filter((line: any) => line.status === "success");
+    const successLines = lines.filter(
+      (line): line is ScrapeSuccess =>
+        line.status === "success" && "data" in line,
+    );
     expect(successLines.length).toBeGreaterThanOrEqual(2);
     expect(successLines[0].targetUrl).toBe("https://example.com");
     expect(successLines[1].targetUrl).toBe("https://example.com/robots.txt");
 
-    const batchSummary = lines.find((line: any) => line.summary)!;
-    expect(batchSummary.progress.completed).toBeGreaterThanOrEqual(2);
-
-    // Check summary
-    expect(lines[2].summary.succeeded + lines[2].summary.failed).toBe(2);
+    const batchSummary = lines.find(
+      (line): line is ScrapeSummary =>
+        line.status === "success" && "summary" in line,
+    );
+    expect(batchSummary).toBeDefined();
+    if (!batchSummary) return;
+    expect(batchSummary.progress?.completed).toBeGreaterThanOrEqual(2);
+    expect(batchSummary.summary.succeeded + batchSummary.summary.failed).toBe(
+      2,
+    );
   }, 60000); // Even longer timeout for multiple pages
 
   it("respects timeout settings", async () => {
@@ -119,19 +137,15 @@ e2eDescribe("E2E: /scrape route with real browser", () => {
 
     expect(res.status).toBe(200);
 
-    const text = await res.text();
-    const lines = text
-      .trim()
-      .split("\n")
-      .map((line: string) => JSON.parse(line));
+    const lines = parseStreamLines(await res.text());
 
-    // Should fail to connect
-    const firstLine = lines.find((line: any) => line.status !== "progress");
+    const firstLine = lines.find((line) => line.status !== "progress");
     expect(firstLine?.status).not.toBe("success");
   }, 10000);
 });
 
 e2eDescribe("E2E: /health route with real browser check", () => {
+  // biome-ignore lint/suspicious/noExplicitAny: test client type is dynamic
   let client: any; // Type inference doesn't work well with testClient in tests
 
   beforeAll(() => {

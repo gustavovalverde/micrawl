@@ -7,13 +7,13 @@ import { getEnv } from "./env.js";
 import { logger } from "./logger.js";
 import { runScrapeJob, verifyChromiumLaunch } from "./scraper.js";
 import type {
+  ContentFormat,
   ScrapeError,
   ScrapeErrorDetail,
   ScrapeJob,
   ScrapePhase,
   ScrapeProgressUpdate,
   ScrapeSummary,
-  ContentFormat,
 } from "./types/scrape.js";
 
 const runtimeConfig = getEnv();
@@ -21,7 +21,7 @@ const runtimeConfig = getEnv();
 const SUPPORTED_PROTOCOLS = new Set(["http:", "https:"]);
 
 const SUPPORTED_OUTPUT_FORMATS = ["html", "markdown"] as const;
-const OUTPUT_FORMAT_SET = new Set<ContentFormat>(SUPPORTED_OUTPUT_FORMATS);
+const _OUTPUT_FORMAT_SET = new Set<ContentFormat>(SUPPORTED_OUTPUT_FORMATS);
 
 const outputFormatValueSchema = z.preprocess(
   (value) => (typeof value === "string" ? value.trim().toLowerCase() : value),
@@ -154,7 +154,9 @@ export const scrapeRequestSchema = z
         return deduped.length > 0 ? deduped : ["html"];
       })
       .optional()
-      .transform((formats) => (formats ?? ["html"])) as z.ZodType<ContentFormat[]>,
+      .transform((formats) => formats ?? ["html"]) as z.ZodType<
+      ContentFormat[]
+    >,
   })
   .strict();
 
@@ -231,9 +233,12 @@ export const registerRoutes = (app: Hono) => {
       }
 
       if (requiresDom && jobRequest.captureTextOnly) {
-        logger.debug("Overriding captureTextOnly to false for DOM-dependent formats", {
-          requestedFormats: outputFormats,
-        });
+        logger.debug(
+          "Overriding captureTextOnly to false for DOM-dependent formats",
+          {
+            requestedFormats: outputFormats,
+          },
+        );
       }
 
       const jobId = randomUUID();

@@ -88,8 +88,14 @@ describe("runScrapeJob runtime behaviour", () => {
     expect(second.status).toBe("success");
     expect(launchMock).toHaveBeenCalledTimes(1);
     expect(browser.newContext).toHaveBeenCalledTimes(2);
-    expect(page.waitForSelector).toHaveBeenCalledWith("body", expect.any(Object));
-    expect(page.waitForLoadState).toHaveBeenCalledWith("networkidle", expect.any(Object));
+    expect(page.waitForSelector).toHaveBeenCalledWith(
+      "body",
+      expect.any(Object),
+    );
+    expect(page.waitForLoadState).toHaveBeenCalledWith(
+      "networkidle",
+      expect.any(Object),
+    );
   });
 
   it("fails fast for disallowed file extensions", async () => {

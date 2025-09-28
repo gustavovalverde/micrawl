@@ -1,5 +1,13 @@
 import { testClient } from "hono/testing";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type {
+  ScrapeError,
+  ScrapeFailure,
+  ScrapeProgressUpdate,
+  ScrapeStreamMessage,
+  ScrapeSuccess,
+  ScrapeSummary,
+} from "../src/types/scrape.js";
 
 // Mock the scraper module with functions directly in the factory
 vi.mock("../src/scraper.js", () => ({
@@ -18,7 +26,15 @@ import { runScrapeJob, verifyChromiumLaunch } from "../src/scraper.js";
 const runScrapeJobMock = vi.mocked(runScrapeJob);
 const verifyChromiumLaunchMock = vi.mocked(verifyChromiumLaunch);
 
+const parseStreamLines = (raw: string): ScrapeStreamMessage[] =>
+  raw
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((line: string) => JSON.parse(line) as ScrapeStreamMessage);
+
 describe("/scrape route", () => {
+  // biome-ignore lint/suspicious/noExplicitAny: test client type is dynamic
   let client: any;
 
   beforeEach(() => {
@@ -28,44 +44,46 @@ describe("/scrape route", () => {
   });
 
   it("streams successful job data and summary", async () => {
-    runScrapeJobMock.mockImplementationOnce(async (_job, jobId, meta, reportPhase) => {
-      await reportPhase?.("navigating");
-      await reportPhase?.("capturing");
+    runScrapeJobMock.mockImplementationOnce(
+      async (_job, jobId, meta, reportPhase) => {
+        await reportPhase?.("navigating");
+        await reportPhase?.("capturing");
 
-      return {
-        status: "success",
-        jobId,
-        index: meta.index,
-        total: meta.total,
-        targetUrl: meta.targetUrl,
-        data: {
-          page: {
-            url: "https://example.com",
-            title: "Example",
-            httpStatusCode: 200,
-            startedAt: "2025-09-26T00:00:00.000Z",
-            finishedAt: "2025-09-26T00:00:01.000Z",
-            durationMs: 1000,
-            loadStrategy: "load-event",
-            contents: [
-              {
-                format: "html",
-                contentType: "text/html",
-                body: "<html></html>",
-                bytes: 10,
+        return {
+          status: "success",
+          jobId,
+          index: meta.index,
+          total: meta.total,
+          targetUrl: meta.targetUrl,
+          data: {
+            page: {
+              url: "https://example.com",
+              title: "Example",
+              httpStatusCode: 200,
+              startedAt: "2025-09-26T00:00:00.000Z",
+              finishedAt: "2025-09-26T00:00:01.000Z",
+              durationMs: 1000,
+              loadStrategy: "load-event",
+              contents: [
+                {
+                  format: "html",
+                  contentType: "text/html",
+                  body: "<html></html>",
+                  bytes: 10,
+                },
+              ],
+              metadata: {
+                description: "Example description",
+                canonicalUrl: "https://example.com/",
+                keywords: ["one", "two"],
+                author: "Example Author",
+                sameOriginLinks: ["https://example.com/about"],
               },
-            ],
-            metadata: {
-              description: "Example description",
-              canonicalUrl: "https://example.com/",
-              keywords: ["one", "two"],
-              author: "Example Author",
-              sameOriginLinks: ["https://example.com/about"],
             },
           },
-        },
-      };
-    });
+        };
+      },
+    );
 
     const res = await client.scrape.$post({
       json: { urls: ["https://example.com"] },
@@ -73,15 +91,13 @@ describe("/scrape route", () => {
 
     expect(res.status).toBe(200);
 
-    const text = await res.text();
-    const lines = text
-      .trim()
-      .split("\n")
-      .map((line: string) => JSON.parse(line));
+    const lines = parseStreamLines(await res.text());
 
     expect(lines).toHaveLength(5);
-    const progressEvents = lines.filter((line: any) => line.status === "progress");
-    expect(progressEvents.map((event: any) => event.phase)).toEqual([
+    const progressEvents = lines.filter(
+      (line): line is ScrapeProgressUpdate => line.status === "progress",
+    );
+    expect(progressEvents.map((event) => event.phase)).toEqual([
       "queued",
       "navigating",
       "capturing",
@@ -96,8 +112,11 @@ describe("/scrape route", () => {
     }
 
     const result = lines.find(
-      (line: any) => line.status === "success" && line.data?.page,
-    )!;
+      (line): line is ScrapeSuccess =>
+        line.status === "success" && "data" in line,
+    );
+    expect(result).toBeDefined();
+    if (!result) return;
     expect(result.jobId).toBeDefined();
     expect(result.index).toBe(1);
     expect(result.total).toBe(1);
@@ -124,7 +143,12 @@ describe("/scrape route", () => {
         bytes: 10,
       },
     ]);
-    const summary = lines.find((line: any) => line.summary)!;
+    const summary = lines.find(
+      (line): line is ScrapeSummary =>
+        line.status === "success" && "summary" in line,
+    );
+    expect(summary).toBeDefined();
+    if (!summary) return;
     expect(summary.status).toBe("success");
     expect(summary.phase).toBe("completed");
     expect(summary.index).toBe(2);
@@ -155,40 +179,42 @@ describe("/scrape route", () => {
   });
 
   it("streams markdown payload when requested", async () => {
-    runScrapeJobMock.mockImplementationOnce(async (job, jobId, meta, reportPhase) => {
-      await reportPhase?.("navigating");
-      await reportPhase?.("capturing");
+    runScrapeJobMock.mockImplementationOnce(
+      async (job, jobId, meta, reportPhase) => {
+        await reportPhase?.("navigating");
+        await reportPhase?.("capturing");
 
-      expect(job.outputFormats).toEqual(["markdown"]);
-      expect(job.captureTextOnly).toBe(false);
+        expect(job.outputFormats).toEqual(["markdown"]);
+        expect(job.captureTextOnly).toBe(false);
 
-      return {
-        status: "success",
-        jobId,
-        index: meta.index,
-        total: meta.total,
-        targetUrl: meta.targetUrl,
-        data: {
-          page: {
-            url: "https://example.com",
-            title: "Example",
-            httpStatusCode: 200,
-            startedAt: "2025-09-26T00:00:00.000Z",
-            finishedAt: "2025-09-26T00:00:01.000Z",
-            durationMs: 1000,
-            loadStrategy: "load-event",
-            contents: [
-              {
-                format: "markdown",
-                contentType: "text/markdown",
-                body: "# Heading\n",
-                bytes: 11,
-              },
-            ],
+        return {
+          status: "success",
+          jobId,
+          index: meta.index,
+          total: meta.total,
+          targetUrl: meta.targetUrl,
+          data: {
+            page: {
+              url: "https://example.com",
+              title: "Example",
+              httpStatusCode: 200,
+              startedAt: "2025-09-26T00:00:00.000Z",
+              finishedAt: "2025-09-26T00:00:01.000Z",
+              durationMs: 1000,
+              loadStrategy: "load-event",
+              contents: [
+                {
+                  format: "markdown",
+                  contentType: "text/markdown",
+                  body: "# Heading\n",
+                  bytes: 11,
+                },
+              ],
+            },
           },
-        },
-      };
-    });
+        };
+      },
+    );
 
     const res = await client.scrape.$post({
       json: { urls: ["https://example.com"], outputFormats: ["markdown"] },
@@ -196,15 +222,14 @@ describe("/scrape route", () => {
 
     expect(res.status).toBe(200);
 
-    const text = await res.text();
-    const lines = text
-      .trim()
-      .split("\n")
-      .map((line: string) => JSON.parse(line));
+    const lines = parseStreamLines(await res.text());
 
     const result = lines.find(
-      (line: any) => line.status === "success" && line.data?.page,
-    )!;
+      (line): line is ScrapeSuccess =>
+        line.status === "success" && "data" in line,
+    );
+    expect(result).toBeDefined();
+    if (!result) return;
 
     expect(result.data.page.contents).toEqual([
       {
@@ -223,14 +248,14 @@ describe("/scrape route", () => {
       json: { urls: ["https://bad.example"] },
     });
 
-    const text = await res.text();
-    const lines = text
-      .trim()
-      .split("\n")
-      .map((line: string) => JSON.parse(line));
+    const lines = parseStreamLines(await res.text());
 
     expect(lines).toHaveLength(3);
-    const [queued, errorRecord, summary] = lines;
+    const [queued, errorRecord, summary] = lines as [
+      ScrapeProgressUpdate,
+      ScrapeError,
+      ScrapeSummary,
+    ];
 
     expect(queued.status).toBe("progress");
     expect(queued.phase).toBe("queued");
@@ -276,14 +301,14 @@ describe("/scrape route", () => {
       json: { urls: ["https://broken.example"] },
     });
 
-    const text = await res.text();
-    const lines = text
-      .trim()
-      .split("\n")
-      .map((line: string) => JSON.parse(line));
+    const lines = parseStreamLines(await res.text());
 
     expect(lines).toHaveLength(3);
-    const [queued, failRecord, summary] = lines;
+    const [queued, failRecord, summary] = lines as [
+      ScrapeProgressUpdate,
+      ScrapeFailure,
+      ScrapeSummary,
+    ];
 
     expect(queued.status).toBe("progress");
     expect(queued.phase).toBe("queued");
@@ -331,27 +356,27 @@ describe("/scrape route", () => {
         index: context.index,
         total: context.total,
         targetUrl: context.targetUrl,
-      data: {
-        page: {
-          url: "https://example1.com",
-          title: "Example 1",
+        data: {
+          page: {
+            url: "https://example1.com",
+            title: "Example 1",
             content: "<html></html>",
             httpStatusCode: 200,
             startedAt: "2025-09-26T00:00:00.000Z",
             finishedAt: "2025-09-26T00:00:01.000Z",
             durationMs: 1000,
             loadStrategy: "load-event",
-          contents: [
-            {
-              format: "html",
-              contentType: "text/html",
-              body: "<html></html>",
-              bytes: 10,
-            },
-          ],
+            contents: [
+              {
+                format: "html",
+                contentType: "text/html",
+                body: "<html></html>",
+                bytes: 10,
+              },
+            ],
+          },
         },
-      },
-    }))
+      }))
       .mockImplementationOnce(async (_job, jobId, context) => ({
         status: "success",
         jobId,
@@ -384,27 +409,31 @@ describe("/scrape route", () => {
       json: { urls: ["https://example1.com", "https://example2.com"] },
     });
 
-    const text = await res.text();
-    const lines = text
-      .trim()
-      .split("\n")
-      .map((line: string) => JSON.parse(line));
+    const lines = parseStreamLines(await res.text());
 
     expect(lines).toHaveLength(5);
 
-    const progressLines = lines.filter((line: any) => line.status === "progress");
+    const progressLines = lines.filter(
+      (line): line is ScrapeProgressUpdate => line.status === "progress",
+    );
     expect(progressLines).toHaveLength(2);
     expect(progressLines[0].phase).toBe("queued");
     expect(progressLines[1].phase).toBe("queued");
 
     const results = lines.filter(
-      (line: any) => line.status === "success" && line.data?.page,
+      (line): line is ScrapeSuccess =>
+        line.status === "success" && "data" in line,
     );
     expect(results).toHaveLength(2);
     expect(results[0].targetUrl).toBe("https://example1.com/");
     expect(results[1].targetUrl).toBe("https://example2.com/");
 
-    const summary = lines.find((line: any) => line.summary)!;
+    const summary = lines.find(
+      (line): line is ScrapeSummary =>
+        line.status === "success" && "summary" in line,
+    );
+    expect(summary).toBeDefined();
+    if (!summary) return;
     expect(summary.progress).toMatchObject({
       completed: 2,
       remaining: 0,
@@ -417,6 +446,7 @@ describe("/scrape route", () => {
 });
 
 describe("/health route", () => {
+  // biome-ignore lint/suspicious/noExplicitAny: test client type is dynamic
   let client: any;
 
   beforeEach(() => {

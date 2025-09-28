@@ -7,8 +7,12 @@ import {
 
 describe("scraper filters", () => {
   it("flags disallowed file extensions", () => {
-    expect(isBlockedExtension(new URL("https://site.example/report.pdf"))).toBe(true);
-    expect(isBlockedExtension(new URL("https://site.example/index.html"))).toBe(false);
+    expect(isBlockedExtension(new URL("https://site.example/report.pdf"))).toBe(
+      true,
+    );
+    expect(isBlockedExtension(new URL("https://site.example/index.html"))).toBe(
+      false,
+    );
   });
 
   it("identifies analytics/ad domains", () => {
