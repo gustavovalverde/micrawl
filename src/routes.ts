@@ -10,10 +10,76 @@ import type {
   ScrapeError,
   ScrapeErrorDetail,
   ScrapeJob,
+  ScrapePhase,
+  ScrapeProgressUpdate,
   ScrapeSummary,
 } from "./types/scrape.js";
 
 const runtimeConfig = getEnv();
+
+const SUPPORTED_PROTOCOLS = new Set(["http:", "https:"]);
+
+const normalizeTargetUrls = (
+  urls: string[],
+  ctx: z.RefinementCtx,
+): string[] => {
+  const normalized: string[] = [];
+  const seen = new Set<string>();
+
+  urls.forEach((rawUrl, index) => {
+    let parsed: URL;
+
+    try {
+      parsed = new URL(rawUrl);
+    } catch {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Invalid URL: ${rawUrl}`,
+        path: ["urls", index],
+      });
+      return;
+    }
+
+    if (!SUPPORTED_PROTOCOLS.has(parsed.protocol)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Unsupported URL protocol: ${parsed.protocol}`,
+        path: ["urls", index],
+      });
+      return;
+    }
+
+    parsed.hash = "";
+
+    if (parsed.pathname !== "/") {
+      const trimmedPath = parsed.pathname.replace(/\/+$/, "");
+      parsed.pathname = trimmedPath === "" ? "/" : trimmedPath;
+    }
+
+    if (parsed.search) {
+      parsed.searchParams.sort();
+      parsed.search = parsed.searchParams.toString()
+        ? `?${parsed.searchParams.toString()}`
+        : "";
+    }
+
+    const canonical = parsed.toString();
+
+    if (seen.has(canonical)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Duplicate target URL detected: ${canonical}`,
+        path: ["urls", index],
+      });
+      return;
+    }
+
+    seen.add(canonical);
+    normalized.push(canonical);
+  });
+
+  return normalized;
+};
 
 export const headerOverridesSchema = z
   .record(z.string().trim(), z.string().trim())
@@ -46,7 +112,8 @@ export const scrapeRequestSchema = z
       .max(
         runtimeConfig.SCRAPER_MAX_URLS_PER_REQUEST,
         `Batch limited to ${runtimeConfig.SCRAPER_MAX_URLS_PER_REQUEST} URLs per request.`,
-      ),
+      )
+      .transform((value, ctx) => normalizeTargetUrls(value, ctx)),
     mode: z.enum(["sync", "async"]).catch("sync"),
     captureTextOnly: z.boolean().catch(runtimeConfig.SCRAPER_TEXT_ONLY_DEFAULT),
     waitForSelector: z.string().trim().min(1).optional(),
@@ -165,8 +232,42 @@ export const registerRoutes = (app: Hono) => {
             targetUrl: job.targetUrl,
           } as const;
 
+          const captureProgressSnapshot = (completedCount: number) => ({
+            completed: completedCount,
+            remaining: totalJobs - completedCount,
+            succeeded: succeededCount,
+            failed: failedCount,
+          });
+
+          const emitPhaseUpdate = async (
+            phase: Exclude<ScrapePhase, "completed">,
+            completedCount = sequence - 1,
+          ) => {
+            const snapshot = captureProgressSnapshot(completedCount);
+            const payload: ScrapeProgressUpdate = {
+              status: "progress",
+              jobId,
+              index: sequence,
+              total: totalJobs,
+              targetUrl: job.targetUrl,
+              phase,
+              progress: snapshot,
+            };
+            await stream.writeln(JSON.stringify(payload));
+          };
+
+          await emitPhaseUpdate("queued");
+
           try {
-            const record = await runScrapeJob(job, jobId, position);
+            const record = await runScrapeJob(
+              job,
+              jobId,
+              position,
+              async (phase) => {
+                if (phase === "completed") return;
+                await emitPhaseUpdate(phase);
+              },
+            );
 
             if (record.status === "success") {
               summary.succeeded += 1;
@@ -188,6 +289,7 @@ export const registerRoutes = (app: Hono) => {
               JSON.stringify({
                 ...record,
                 progress,
+                phase: "completed",
               }),
             );
           } catch (error) {
@@ -218,6 +320,7 @@ export const registerRoutes = (app: Hono) => {
               targetUrl: job.targetUrl,
               message,
               progress,
+              phase: "completed",
             };
             await stream.writeln(JSON.stringify(payload));
           }
@@ -246,6 +349,7 @@ export const registerRoutes = (app: Hono) => {
             failed: summary.failed,
             failures: summary.failures,
           },
+          phase: "completed",
         };
 
         // Emit the terminating summary so client loops know when to close down

@@ -19,6 +19,7 @@ import type {
   ScrapeFailure,
   ScrapeFailureMeta,
   ScrapeJob,
+  ScrapePhase,
   ScrapeSuccess,
 } from "./types/scrape.js";
 
@@ -145,6 +146,83 @@ const getBrowser = async (): Promise<Browser> => {
   return cachedBrowserPromise;
 };
 
+interface EvaluatedMetadata {
+  description?: string | null;
+  keywords?: string | null;
+  author?: string | null;
+  canonicalUrl?: string | null;
+  sameOriginLinks: string[];
+}
+
+const collectMetadata = async (page: Page): Promise<EvaluatedMetadata | undefined> => {
+  try {
+    return await page.evaluate(() => {
+      const getMetaContent = (selector: string) =>
+        document.querySelector<HTMLMetaElement>(selector)?.content?.trim() ?? undefined;
+
+      const description =
+        getMetaContent('meta[name="description"]')
+        ?? getMetaContent('meta[property="og:description"]');
+
+      const keywords = getMetaContent('meta[name="keywords"]');
+      const author =
+        getMetaContent('meta[name="author"]')
+        ?? getMetaContent('meta[property="article:author"]');
+
+      const canonicalRaw = document
+        .querySelector<HTMLLinkElement>('link[rel="canonical"]')?.href?.trim();
+
+      const canonicalUrl = (() => {
+        if (!canonicalRaw) return undefined;
+        try {
+          const resolved = new URL(canonicalRaw, window.location.href);
+          resolved.hash = '';
+          return resolved.href;
+        }
+        catch {
+          return undefined;
+        }
+      })();
+
+      const sameOriginLinks: string[] = [];
+      const seen = new Set<string>();
+
+      document.querySelectorAll<HTMLAnchorElement>('a[href]').forEach((anchor) => {
+        const href = anchor.getAttribute('href');
+        if (!href) return;
+
+        try {
+          const resolved = new URL(href, window.location.href);
+          if (!['http:', 'https:'].includes(resolved.protocol)) return;
+          if (resolved.origin !== window.location.origin) return;
+          resolved.hash = '';
+          const normalized = resolved.href;
+          if (seen.has(normalized)) return;
+          seen.add(normalized);
+          sameOriginLinks.push(normalized);
+        }
+        catch {
+          // Ignore malformed links
+        }
+      });
+
+      return {
+        description,
+        keywords,
+        author,
+        canonicalUrl,
+        sameOriginLinks,
+      } satisfies EvaluatedMetadata;
+    });
+  }
+  catch (error) {
+    logger.debug("Metadata extraction failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return undefined;
+  }
+};
+
 const mapErrorToPageError = (error: unknown): string => {
   const message = error instanceof Error ? error.message : String(error);
 
@@ -179,6 +257,7 @@ export const runScrapeJob = async (
     total: number;
     targetUrl: string;
   },
+  reportPhase?: (phase: ScrapePhase) => Promise<void> | void,
 ): Promise<ScrapeSuccess | ScrapeFailure> => {
   logger.info("Starting scrape job", {
     targetUrl: job.targetUrl,
@@ -189,6 +268,21 @@ export const runScrapeJob = async (
   });
 
   let scrapedPage: ScrapedPage | null = null;
+
+  const notifyPhase = async (phase: ScrapePhase) => {
+    if (!reportPhase) {
+      return;
+    }
+
+    try {
+      await reportPhase(phase);
+    } catch (error) {
+      logger.debug("Failed to report phase", {
+        phase,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
 
   let context: BrowserContext | null = null;
   let page: Page | null = null;
@@ -247,6 +341,7 @@ export const runScrapeJob = async (
 
     // Navigate to the page
     logger.info("Navigating to URL", { url: job.targetUrl, jobId });
+    await notifyPhase("navigating");
     const response = await page.goto(job.targetUrl, {
       waitUntil: "load",
       timeout: job.timeoutMs,
@@ -284,6 +379,8 @@ export const runScrapeJob = async (
       });
     }
 
+    await notifyPhase("capturing");
+
     // Get page content
     let payloadBody: string;
     let payloadContentType: string | undefined;
@@ -313,6 +410,13 @@ export const runScrapeJob = async (
     finishedAtIso = new Date().toISOString();
     durationMs = Date.now() - startedAtMs;
 
+    const evaluatedMetadata = await collectMetadata(page);
+
+    const keywordList = evaluatedMetadata?.keywords
+      ?.split(",")
+      .map((keyword) => keyword.trim())
+      .filter((keyword) => keyword.length > 0);
+
     scrapedPage = {
       url: job.targetUrl,
       title: await page.title(),
@@ -324,6 +428,15 @@ export const runScrapeJob = async (
       finishedAt: finishedAtIso,
       durationMs,
       loadStrategy,
+      metadata: evaluatedMetadata
+        ? {
+            description: evaluatedMetadata.description ?? undefined,
+            author: evaluatedMetadata.author ?? undefined,
+            canonicalUrl: evaluatedMetadata.canonicalUrl ?? undefined,
+            keywords: keywordList && keywordList.length > 0 ? keywordList : undefined,
+            sameOriginLinks: evaluatedMetadata.sameOriginLinks ?? [],
+          }
+        : undefined,
     };
 
     logger.info("Scrape job completed successfully", {
@@ -370,6 +483,7 @@ export const runScrapeJob = async (
       index: position.index,
       total: position.total,
       targetUrl: position.targetUrl,
+      phase: "completed",
       data: {
         page: scrapedPage,
       },
@@ -401,6 +515,7 @@ export const runScrapeJob = async (
     index: position.index,
     total: position.total,
     targetUrl: position.targetUrl,
+    phase: "completed",
     errors: [errorDetail],
   };
 

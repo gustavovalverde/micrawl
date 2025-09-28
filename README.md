@@ -92,25 +92,47 @@ vercel deploy
 }
 ```
 
+Micrawl normalizes every URL you send before the scrape starts. Trailing hashes
+are stripped, repeated slashes collapse to a single `/`, query parameters are
+sorted for stable caching, and duplicate targets are rejected with a validation
+error. Only `http://` and `https://` origins are accepted; everything else (for
+example `ftp://` or `file://`) is rejected up front so you can fix the payload
+without guessing.
+
 ### Response at a glance
 
-The service writes one JSON line per URL plus a final summary line. Every line contains:
+Micrawl streams a sequence of newline-delimited JSON records for every batch:
 
-- `status`: `success`, `fail`, or `error` (summary uses `success`).
-- `jobId`: UUID shared by all lines in the batch.
+1. One or more `status: "progress"` records announce the current phase of the
+   scrape (`queued`, `navigating`, `capturing`).
+2. A terminal record for the URL (`success`, `fail`, or `error`).
+3. A final summary record (`status: "success"`) once the batch concludes.
+
+All records include:
+
+- `jobId`: UUID shared by the entire batch.
 - `index` / `total`: position within the batch (summary uses `total + 1`).
-- `targetUrl`: present on per-URL lines so you know which scrape just completed.
-- `progress`: running counters `{ completed, remaining, succeeded, failed }`.
-- Payload block:
-  - `data.page` on `status: "success"`.
-  - `errors` on `status: "fail"`.
-  - `message` on `status: "error"`.
-  - `summary` on the final line.
+- `progress`: counters `{ completed, remaining, succeeded, failed }` computed at
+  the time the record was emitted so dashboards can update without manual math.
+- `phase`: current scrape phase; `progress` lines report `queued`, `navigating`,
+  or `capturing`, while terminal records and the summary use `completed`.
+- `targetUrl`: the normalized URL being processed (omitted on the summary).
+
+Payload blocks vary by status:
+
+- `data.page` on `status: "success"` now includes a `metadata` object with
+  `description`, `keywords`, `author`, `canonicalUrl`, and a `sameOriginLinks`
+  array for quick link graph traversal.
+- `errors` on `status: "fail"` (scraper caught the issue and returned details).
+- `message` on `status: "error"` (unexpected exception in the pipeline).
+- `summary` on the final line summarising successes, failures, and error list.
 
 ```jsonc
-{"status":"success","jobId":"94d8...","index":1,"total":2,"targetUrl":"https://example.com","progress":{"completed":1,"remaining":1,"succeeded":1,"failed":0},"data":{"page":{"url":"https://example.com","title":"Example Domain","content":"<html>...","contentType":"text/html","bytes":1280,"httpStatusCode":200,"startedAt":"2025-09-26T17:30:41.128Z","finishedAt":"2025-09-26T17:30:42.042Z","durationMs":914,"loadStrategy":"load-event"}}}
-{"status":"fail","jobId":"94d8...","index":2,"total":2,"targetUrl":"https://example.org","progress":{"completed":2,"remaining":0,"succeeded":1,"failed":1},"errors":[{"targetUrl":"https://example.org","message":"Timed out while loading the page","httpStatusCode":504,"meta":{"targetUrl":"https://example.org","startedAt":"2025-09-26T17:30:42.049Z","finishedAt":"2025-09-26T17:30:47.050Z","durationMs":5001,"loadStrategy":"wait-for-selector"}}]}
-{"status":"success","jobId":"94d8...","index":3,"total":2,"progress":{"completed":2,"remaining":0,"succeeded":1,"failed":1},"summary":{"succeeded":1,"failed":1,"failures":[{"targetUrl":"https://example.org","message":"Timed out while loading the page","httpStatusCode":504}]}}
+{"status":"progress","phase":"queued","jobId":"2f1c...","index":1,"total":1,"targetUrl":"https://example.com/","progress":{"completed":0,"remaining":1,"succeeded":0,"failed":0}}
+{"status":"progress","phase":"navigating","jobId":"2f1c...","index":1,"total":1,"targetUrl":"https://example.com/","progress":{"completed":0,"remaining":1,"succeeded":0,"failed":0}}
+{"status":"progress","phase":"capturing","jobId":"2f1c...","index":1,"total":1,"targetUrl":"https://example.com/","progress":{"completed":0,"remaining":1,"succeeded":0,"failed":0}}
+{"status":"success","phase":"completed","jobId":"2f1c...","index":1,"total":1,"targetUrl":"https://example.com/","progress":{"completed":1,"remaining":0,"succeeded":1,"failed":0},"data":{"page":{"url":"https://example.com/","title":"Example Domain","content":"<html>...","contentType":"text/html","bytes":1280,"httpStatusCode":200,"startedAt":"2025-09-26T17:30:41.128Z","finishedAt":"2025-09-26T17:30:42.042Z","durationMs":914,"loadStrategy":"load-event","metadata":{"description":"Example Domain","keywords":["example"],"author":"Example Team","canonicalUrl":"https://example.com/","sameOriginLinks":["https://example.com/about/"]}}}}
+{"status":"success","phase":"completed","jobId":"2f1c...","index":2,"total":1,"progress":{"completed":1,"remaining":0,"succeeded":1,"failed":0},"summary":{"succeeded":1,"failed":0,"failures":[]}}
 ```
 
 ### Why streaming instead of async?
@@ -133,6 +155,9 @@ curl -N \
 
 - `curl -N` disables stdout buffering so you visibly see the stream.
 - Each line is valid JSON terminated by `\n`. Process them as they arrive for real-time behaviour, or buffer them for the traditional experience.
+- Expect a few `status: "progress"` heartbeats before each result. Use the
+  `phase` field (`queued` → `navigating` → `capturing`) to drive UI state or
+  logs.
 - The final line (with `summary`) is the definitive “batch complete” signal.
 - If the connection closes before the summary arrives, assume the batch ended early and inspect logs (every line shares the same `jobId`).
 
@@ -156,6 +181,15 @@ const rl = createInterface({ input: res.body as unknown as NodeJS.ReadableStream
 for await (const line of rl) {
   if (!line) continue;
   const record = JSON.parse(line);
+
+  if (record.status === "progress") {
+    console.log(
+      `[${record.index}/${record.total}] → ${record.phase}`,
+      record.targetUrl,
+      record.progress,
+    );
+    continue;
+  }
 
   if (record.status === "success" && record.data?.page) {
     console.log(`[${record.index}/${record.total}] ✅`, record.targetUrl, record.progress);
@@ -183,6 +217,14 @@ for raw in resp.iter_lines():
     if not raw:
         continue
     record = json.loads(raw.decode("utf-8"))
+
+    if record["status"] == "progress":
+        print(
+            f"{record['index']}/{record['total']} → {record['phase']}",
+            record.get("targetUrl"),
+            record["progress"],
+        )
+        continue
 
     if record["status"] == "success" and "data" in record:
         print(f"{record['index']}/{record['total']} ✅ {record.get('targetUrl')}", record["progress"])

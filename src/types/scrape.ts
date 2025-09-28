@@ -1,5 +1,7 @@
 export type LoadStrategy = "load-event" | "wait-for-selector";
 
+export type ScrapePhase = "queued" | "navigating" | "capturing" | "completed";
+
 export interface ScrapeJob {
   targetUrl: string;
   waitForSelector?: string;
@@ -31,6 +33,15 @@ export interface ScrapedPage {
   finishedAt: string;
   durationMs: number;
   loadStrategy: LoadStrategy;
+  metadata?: ScrapedMetadata;
+}
+
+export interface ScrapedMetadata {
+  description?: string;
+  keywords?: string[];
+  author?: string;
+  canonicalUrl?: string;
+  sameOriginLinks: string[];
 }
 
 export interface ScrapeFailureMeta {
@@ -49,17 +60,23 @@ export interface ScrapeErrorDetail {
 }
 
 export interface ScrapeRecordBase {
-  status: "success" | "fail" | "error";
+  status: "success" | "fail" | "error" | "progress";
   targetUrl?: string;
   jobId: string;
   index: number;
   total: number;
+  phase?: ScrapePhase;
   progress?: {
     completed: number;
     remaining: number;
     succeeded: number;
     failed: number;
   };
+}
+
+export interface ScrapeProgressUpdate extends ScrapeRecordBase {
+  status: "progress";
+  phase: Exclude<ScrapePhase, "completed">;
 }
 
 export interface ScrapeSuccess extends ScrapeRecordBase {
@@ -89,6 +106,7 @@ export interface ScrapeSummary extends ScrapeRecordBase {
 }
 
 export type ScrapeStreamMessage =
+  | ScrapeProgressUpdate
   | ScrapeSuccess
   | ScrapeFailure
   | ScrapeError

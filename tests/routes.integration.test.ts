@@ -28,27 +28,39 @@ describe("/scrape route", () => {
   });
 
   it("streams successful job data and summary", async () => {
-    runScrapeJobMock.mockImplementationOnce(async (_job, jobId, meta) => ({
-      status: "success",
-      jobId,
-      index: meta.index,
-      total: meta.total,
-      targetUrl: meta.targetUrl,
-      data: {
-        page: {
-          url: "https://example.com",
-          title: "Example",
-          content: "<html></html>",
-          contentType: "text/html",
-          bytes: 10,
-          httpStatusCode: 200,
-          startedAt: "2025-09-26T00:00:00.000Z",
-          finishedAt: "2025-09-26T00:00:01.000Z",
-          durationMs: 1000,
-          loadStrategy: "load-event",
+    runScrapeJobMock.mockImplementationOnce(async (_job, jobId, meta, reportPhase) => {
+      await reportPhase?.("navigating");
+      await reportPhase?.("capturing");
+
+      return {
+        status: "success",
+        jobId,
+        index: meta.index,
+        total: meta.total,
+        targetUrl: meta.targetUrl,
+        data: {
+          page: {
+            url: "https://example.com",
+            title: "Example",
+            content: "<html></html>",
+            contentType: "text/html",
+            bytes: 10,
+            httpStatusCode: 200,
+            startedAt: "2025-09-26T00:00:00.000Z",
+            finishedAt: "2025-09-26T00:00:01.000Z",
+            durationMs: 1000,
+            loadStrategy: "load-event",
+            metadata: {
+              description: "Example description",
+              canonicalUrl: "https://example.com/",
+              keywords: ["one", "two"],
+              author: "Example Author",
+              sameOriginLinks: ["https://example.com/about"],
+            },
+          },
         },
-      },
-    }));
+      };
+    });
 
     const res = await client.scrape.$post({
       json: { urls: ["https://example.com"] },
@@ -62,22 +74,47 @@ describe("/scrape route", () => {
       .split("\n")
       .map((line: string) => JSON.parse(line));
 
-    expect(lines).toHaveLength(2);
-    const first = lines[0];
-    expect(first.status).toBe("success");
-    expect(first.jobId).toBeDefined();
-    expect(first.index).toBe(1);
-    expect(first.total).toBe(1);
-    expect(first.targetUrl).toBe("https://example.com");
-    expect(first.progress).toMatchObject({
+    expect(lines).toHaveLength(5);
+    const progressEvents = lines.filter((line: any) => line.status === "progress");
+    expect(progressEvents.map((event: any) => event.phase)).toEqual([
+      "queued",
+      "navigating",
+      "capturing",
+    ]);
+    for (const event of progressEvents) {
+      expect(event.progress).toMatchObject({
+        completed: 0,
+        remaining: 1,
+        succeeded: 0,
+        failed: 0,
+      });
+    }
+
+    const result = lines.find(
+      (line: any) => line.status === "success" && line.data?.page,
+    )!;
+    expect(result.jobId).toBeDefined();
+    expect(result.index).toBe(1);
+    expect(result.total).toBe(1);
+    expect(result.targetUrl).toBe("https://example.com/");
+    expect(result.phase).toBe("completed");
+    expect(result.progress).toMatchObject({
       completed: 1,
       remaining: 0,
       succeeded: 1,
       failed: 0,
     });
-    expect(first.data.page.content).toBe("<html></html>");
-    const summary = lines[1];
+    expect(result.data.page.content).toBe("<html></html>");
+    expect(result.data.page.metadata).toEqual({
+      description: "Example description",
+      canonicalUrl: "https://example.com/",
+      keywords: ["one", "two"],
+      author: "Example Author",
+      sameOriginLinks: ["https://example.com/about"],
+    });
+    const summary = lines.find((line: any) => line.summary)!;
     expect(summary.status).toBe("success");
+    expect(summary.phase).toBe("completed");
     expect(summary.index).toBe(2);
     expect(summary.total).toBe(1);
     expect(summary.progress).toMatchObject({
@@ -91,13 +128,14 @@ describe("/scrape route", () => {
       failed: 0,
     });
     expect(runScrapeJobMock).toHaveBeenCalledWith(
-      expect.objectContaining({ targetUrl: "https://example.com" }),
+      expect.objectContaining({ targetUrl: "https://example.com/" }),
       expect.any(String),
       expect.objectContaining({
-        targetUrl: "https://example.com",
+        targetUrl: "https://example.com/",
         index: 1,
         total: 1,
       }),
+      expect.any(Function),
     );
   });
 
@@ -114,16 +152,31 @@ describe("/scrape route", () => {
       .split("\n")
       .map((line: string) => JSON.parse(line));
 
-    expect(lines[0].status).toBe("error");
-    expect(lines[0].targetUrl).toBe("https://bad.example");
-    expect(lines[0].message).toContain("boom");
-    expect(lines[0].progress).toMatchObject({
+    expect(lines).toHaveLength(3);
+    const [queued, errorRecord, summary] = lines;
+
+    expect(queued.status).toBe("progress");
+    expect(queued.phase).toBe("queued");
+    expect(queued.progress).toMatchObject({
+      completed: 0,
+      remaining: 1,
+      succeeded: 0,
+      failed: 0,
+    });
+
+    expect(errorRecord.status).toBe("error");
+    expect(errorRecord.targetUrl).toBe("https://bad.example/");
+    expect(errorRecord.message).toContain("boom");
+    expect(errorRecord.phase).toBe("completed");
+    expect(errorRecord.progress).toMatchObject({
       completed: 1,
       remaining: 0,
       succeeded: 0,
       failed: 1,
     });
-    expect(lines[1].summary.failed).toBe(1);
+
+    expect(summary.summary.failed).toBe(1);
+    expect(summary.phase).toBe("completed");
   });
 
   it("streams fail record when scraper reports handled failure", async () => {
@@ -152,21 +205,34 @@ describe("/scrape route", () => {
       .split("\n")
       .map((line: string) => JSON.parse(line));
 
-    const first = lines[0];
-    expect(first.status).toBe("fail");
-    expect(first.errors[0].message).toContain("Timed out");
-    expect(first.errors[0].httpStatusCode).toBe(504);
-    expect(first.progress).toMatchObject({
+    expect(lines).toHaveLength(3);
+    const [queued, failRecord, summary] = lines;
+
+    expect(queued.status).toBe("progress");
+    expect(queued.phase).toBe("queued");
+    expect(queued.progress).toMatchObject({
+      completed: 0,
+      remaining: 1,
+      succeeded: 0,
+      failed: 0,
+    });
+
+    expect(failRecord.status).toBe("fail");
+    expect(failRecord.phase).toBe("completed");
+    expect(failRecord.errors[0].message).toContain("Timed out");
+    expect(failRecord.errors[0].httpStatusCode).toBe(504);
+    expect(failRecord.progress).toMatchObject({
       completed: 1,
       remaining: 0,
       succeeded: 0,
       failed: 1,
     });
-    const summary = lines[1];
+
     expect(summary.summary.failed).toBe(1);
     expect(summary.summary.failures[0].targetUrl).toBe(
       "https://broken.example",
     );
+    expect(summary.phase).toBe("completed");
   });
 
   it("validates request payload", async () => {
@@ -235,16 +301,29 @@ describe("/scrape route", () => {
       .split("\n")
       .map((line: string) => JSON.parse(line));
 
-    expect(lines).toHaveLength(3); // 2 results + 1 summary
-    expect(lines[0].targetUrl).toBe("https://example1.com");
-    expect(lines[1].targetUrl).toBe("https://example2.com");
-    expect(lines[2].progress).toMatchObject({
+    expect(lines).toHaveLength(5);
+
+    const progressLines = lines.filter((line: any) => line.status === "progress");
+    expect(progressLines).toHaveLength(2);
+    expect(progressLines[0].phase).toBe("queued");
+    expect(progressLines[1].phase).toBe("queued");
+
+    const results = lines.filter(
+      (line: any) => line.status === "success" && line.data?.page,
+    );
+    expect(results).toHaveLength(2);
+    expect(results[0].targetUrl).toBe("https://example1.com/");
+    expect(results[1].targetUrl).toBe("https://example2.com/");
+
+    const summary = lines.find((line: any) => line.summary)!;
+    expect(summary.progress).toMatchObject({
       completed: 2,
       remaining: 0,
       succeeded: 2,
       failed: 0,
     });
-    expect(lines[2].index).toBe(3);
+    expect(summary.index).toBe(3);
+    expect(summary.phase).toBe("completed");
   });
 });
 

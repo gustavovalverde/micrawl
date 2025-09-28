@@ -62,4 +62,35 @@ describe("scrapeRequestSchema", () => {
 
     expect(parse).toThrowError(/Batch limited to 5 URLs/);
   });
+
+  it("normalizes URLs and rejects duplicates", async () => {
+    const { scrapeRequestSchema } = await loadSchema();
+
+    const result = scrapeRequestSchema.parse({
+      urls: ["https://Example.com/docs/", "https://example.com/docs?id=1&id=2"],
+    });
+
+    expect(result.urls).toEqual([
+      "https://example.com/docs",
+      "https://example.com/docs?id=1&id=2",
+    ]);
+
+    const parseDuplicates = () =>
+      scrapeRequestSchema.parse({
+        urls: ["https://example.com/docs", "https://example.com/docs/"],
+      });
+
+    expect(parseDuplicates).toThrowError(/Duplicate target URL detected/);
+  });
+
+  it("rejects unsupported protocols", async () => {
+    const { scrapeRequestSchema } = await loadSchema();
+
+    const parse = () =>
+      scrapeRequestSchema.parse({
+        urls: ["ftp://example.com/file"],
+      });
+
+    expect(parse).toThrowError(/Unsupported URL protocol/);
+  });
 });
