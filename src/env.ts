@@ -58,6 +58,10 @@ const envSchema = z
       .catch(1080),
     SCRAPER_DEFAULT_USER_AGENT: z.string().trim().min(1).optional(),
     CHROMIUM_BINARY: z.string().url().optional(),
+    SCRAPER_HEALTHCHECK_URL: z
+      .string()
+      .url()
+      .catch("https://example.com/"),
   })
   .passthrough();
 

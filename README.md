@@ -271,6 +271,7 @@ All environment variables are documented and validated in `src/env.ts`:
 - `SCRAPER_DEFAULT_VIEWPORT_WIDTH` (default `1920`)
 - `SCRAPER_DEFAULT_VIEWPORT_HEIGHT` (default `1080`)
 - `SCRAPER_DEFAULT_USER_AGENT` (optional explicit UA; otherwise `user-agents` generates one)
+- `SCRAPER_HEALTHCHECK_URL` (default `https://example.com/`; used by `/health` to verify outbound navigation)
 - `CHROMIUM_BINARY` (optional path override for the Chromium executable)
 
 ## Roadmap & Known Gaps

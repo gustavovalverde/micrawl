@@ -124,9 +124,12 @@ describe("runScrapeJob runtime behaviour", () => {
 
     expect(browser.newContext).toHaveBeenCalled();
     expect(context.newPage).toHaveBeenCalled();
-    expect(page.goto).toHaveBeenCalledWith("data:text/html,Micrawl health", {
-      waitUntil: "load",
-      timeout: 3_000,
+    expect(page.goto).toHaveBeenCalledWith("https://example.com/", {
+      waitUntil: "domcontentloaded",
+      timeout: 5_000,
+    });
+    expect(page.waitForLoadState).toHaveBeenCalledWith("domcontentloaded", {
+      timeout: 5_000,
     });
     expect(page.close).toHaveBeenCalled();
     expect(context.close).toHaveBeenCalled();

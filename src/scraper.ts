@@ -527,16 +527,31 @@ export const runScrapeJob = async (
  * basic navigation still work in the current environment.
  */
 export const verifyChromiumLaunch = async () => {
+  const env = getEnv();
+  const healthcheckUrl = env.SCRAPER_HEALTHCHECK_URL ?? "https://example.com/";
   const browser = await getBrowser();
   const context = await browser.newContext();
   const page = await context.newPage();
 
   try {
-    await page.goto("data:text/html,Micrawl health", {
-      waitUntil: "load",
-      timeout: 3_000,
+    const timeoutMs = 5_000;
+    const response = await page.goto(healthcheckUrl, {
+      waitUntil: "domcontentloaded",
+      timeout: timeoutMs,
     });
-    await page.waitForSelector("body", { timeout: 3_000 }).catch(() => {});
+
+    if (!response) {
+      throw new Error("Healthcheck navigation did not return a response");
+    }
+
+    const status = response.status();
+    if (status >= 400) {
+      throw new Error(
+        `Healthcheck navigation responded with status ${status} for ${healthcheckUrl}`,
+      );
+    }
+
+    await page.waitForLoadState("domcontentloaded", { timeout: timeoutMs });
   } finally {
     try {
       await page.close();
