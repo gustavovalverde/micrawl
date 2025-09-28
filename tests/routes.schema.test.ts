@@ -33,6 +33,7 @@ describe("scrapeRequestSchema", () => {
     expect(result.captureTextOnly).toBe(true);
     expect(result.timeoutMs).toBe(45000);
     expect(result.headers).toEqual({ "x-custom": "Value" });
+    expect(result.outputFormats).toEqual(["html"]);
   });
 
   it("accepts overrides for locale, timezone, viewport, and userAgent", async () => {
@@ -61,6 +62,40 @@ describe("scrapeRequestSchema", () => {
       });
 
     expect(parse).toThrowError(/Batch limited to 5 URLs/);
+  });
+
+  it("normalizes output formats and deduplicates", async () => {
+    const { scrapeRequestSchema } = await loadSchema();
+
+    const result = scrapeRequestSchema.parse({
+      urls: ["https://example.com"],
+      outputFormats: ["HTML", "markdown", "html"],
+    });
+
+    expect(result.outputFormats).toEqual(["html", "markdown"]);
+  });
+
+  it("falls back to html when output formats array is empty", async () => {
+    const { scrapeRequestSchema } = await loadSchema();
+
+    const result = scrapeRequestSchema.parse({
+      urls: ["https://example.com"],
+      outputFormats: [],
+    });
+
+    expect(result.outputFormats).toEqual(["html"]);
+  });
+
+  it("rejects unsupported output formats", async () => {
+    const { scrapeRequestSchema } = await loadSchema();
+
+    const parse = () =>
+      scrapeRequestSchema.parse({
+        urls: ["https://example.com"],
+        outputFormats: ["pdf"],
+      });
+
+    expect(parse).toThrowError(/Invalid enum value/);
   });
 
   it("normalizes URLs and rejects duplicates", async () => {

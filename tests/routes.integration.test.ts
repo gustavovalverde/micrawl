@@ -42,14 +42,19 @@ describe("/scrape route", () => {
           page: {
             url: "https://example.com",
             title: "Example",
-            content: "<html></html>",
-            contentType: "text/html",
-            bytes: 10,
             httpStatusCode: 200,
             startedAt: "2025-09-26T00:00:00.000Z",
             finishedAt: "2025-09-26T00:00:01.000Z",
             durationMs: 1000,
             loadStrategy: "load-event",
+            contents: [
+              {
+                format: "html",
+                contentType: "text/html",
+                body: "<html></html>",
+                bytes: 10,
+              },
+            ],
             metadata: {
               description: "Example description",
               canonicalUrl: "https://example.com/",
@@ -104,7 +109,6 @@ describe("/scrape route", () => {
       succeeded: 1,
       failed: 0,
     });
-    expect(result.data.page.content).toBe("<html></html>");
     expect(result.data.page.metadata).toEqual({
       description: "Example description",
       canonicalUrl: "https://example.com/",
@@ -112,6 +116,14 @@ describe("/scrape route", () => {
       author: "Example Author",
       sameOriginLinks: ["https://example.com/about"],
     });
+    expect(result.data.page.contents).toEqual([
+      {
+        format: "html",
+        contentType: "text/html",
+        body: "<html></html>",
+        bytes: 10,
+      },
+    ]);
     const summary = lines.find((line: any) => line.summary)!;
     expect(summary.status).toBe("success");
     expect(summary.phase).toBe("completed");
@@ -128,7 +140,10 @@ describe("/scrape route", () => {
       failed: 0,
     });
     expect(runScrapeJobMock).toHaveBeenCalledWith(
-      expect.objectContaining({ targetUrl: "https://example.com/" }),
+      expect.objectContaining({
+        targetUrl: "https://example.com/",
+        outputFormats: ["html"],
+      }),
       expect.any(String),
       expect.objectContaining({
         targetUrl: "https://example.com/",
@@ -137,6 +152,68 @@ describe("/scrape route", () => {
       }),
       expect.any(Function),
     );
+  });
+
+  it("streams markdown payload when requested", async () => {
+    runScrapeJobMock.mockImplementationOnce(async (job, jobId, meta, reportPhase) => {
+      await reportPhase?.("navigating");
+      await reportPhase?.("capturing");
+
+      expect(job.outputFormats).toEqual(["markdown"]);
+      expect(job.captureTextOnly).toBe(false);
+
+      return {
+        status: "success",
+        jobId,
+        index: meta.index,
+        total: meta.total,
+        targetUrl: meta.targetUrl,
+        data: {
+          page: {
+            url: "https://example.com",
+            title: "Example",
+            httpStatusCode: 200,
+            startedAt: "2025-09-26T00:00:00.000Z",
+            finishedAt: "2025-09-26T00:00:01.000Z",
+            durationMs: 1000,
+            loadStrategy: "load-event",
+            contents: [
+              {
+                format: "markdown",
+                contentType: "text/markdown",
+                body: "# Heading\n",
+                bytes: 11,
+              },
+            ],
+          },
+        },
+      };
+    });
+
+    const res = await client.scrape.$post({
+      json: { urls: ["https://example.com"], outputFormats: ["markdown"] },
+    });
+
+    expect(res.status).toBe(200);
+
+    const text = await res.text();
+    const lines = text
+      .trim()
+      .split("\n")
+      .map((line: string) => JSON.parse(line));
+
+    const result = lines.find(
+      (line: any) => line.status === "success" && line.data?.page,
+    )!;
+
+    expect(result.data.page.contents).toEqual([
+      {
+        format: "markdown",
+        contentType: "text/markdown",
+        body: "# Heading\n",
+        bytes: 11,
+      },
+    ]);
   });
 
   it("emits failure payload when runScrapeJob throws", async () => {
@@ -254,21 +331,27 @@ describe("/scrape route", () => {
         index: context.index,
         total: context.total,
         targetUrl: context.targetUrl,
-        data: {
-          page: {
-            url: "https://example1.com",
-            title: "Example 1",
+      data: {
+        page: {
+          url: "https://example1.com",
+          title: "Example 1",
             content: "<html></html>",
-            contentType: "text/html",
-            bytes: 10,
             httpStatusCode: 200,
             startedAt: "2025-09-26T00:00:00.000Z",
             finishedAt: "2025-09-26T00:00:01.000Z",
             durationMs: 1000,
             loadStrategy: "load-event",
-          },
+          contents: [
+            {
+              format: "html",
+              contentType: "text/html",
+              body: "<html></html>",
+              bytes: 10,
+            },
+          ],
         },
-      }))
+      },
+    }))
       .mockImplementationOnce(async (_job, jobId, context) => ({
         status: "success",
         jobId,
@@ -280,13 +363,19 @@ describe("/scrape route", () => {
             url: "https://example2.com",
             title: "Example 2",
             content: "<html></html>",
-            contentType: "text/html",
-            bytes: 20,
             httpStatusCode: 200,
             startedAt: "2025-09-26T00:00:00.000Z",
             finishedAt: "2025-09-26T00:00:01.000Z",
             durationMs: 1000,
             loadStrategy: "load-event",
+            contents: [
+              {
+                format: "html",
+                contentType: "text/html",
+                body: "<html></html>",
+                bytes: 20,
+              },
+            ],
           },
         },
       }));

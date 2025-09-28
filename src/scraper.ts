@@ -1,5 +1,6 @@
 import { URL } from "node:url";
 import chromium from "@sparticuz/chromium";
+import { H2MParser } from "h2m-parser";
 import {
   type Browser,
   type BrowserContext,
@@ -21,10 +22,17 @@ import type {
   ScrapeJob,
   ScrapePhase,
   ScrapeSuccess,
+  ContentFormat,
+  ScrapedContent,
 } from "./types/scrape.js";
 
 const generateUserAgent = () =>
   new UserAgent({ deviceCategory: "desktop" }).toString();
+
+const markdownParser = new H2MParser({
+  extract: { readability: false },
+  markdown: { linkStyle: "inline" },
+});
 
 export const buildContextOptions = (job: ScrapeJob): BrowserContextOptions => {
   const env = getEnv();
@@ -295,6 +303,7 @@ export const runScrapeJob = async (
   let durationMs = 0;
   let httpStatusCode: number | undefined;
   let failurePageError: string | null = null;
+  let failureRawMessage: string | null = null;
 
   try {
     const targetUrl = new URL(job.targetUrl);
@@ -417,17 +426,61 @@ export const runScrapeJob = async (
       .map((keyword) => keyword.trim())
       .filter((keyword) => keyword.length > 0);
 
+    const requestedFormats =
+      job.outputFormats && job.outputFormats.length > 0 ? job.outputFormats : ["html"];
+
+    const includeHtml = requestedFormats.includes("html");
+    const includeMarkdown = requestedFormats.includes("markdown");
+
+    const htmlEntry: ScrapedContent = {
+      format: "html",
+      contentType: payloadContentType ?? "text/html",
+      body: payloadBody,
+      bytes: Buffer.byteLength(payloadBody, "utf8"),
+    };
+
+    const contents: ScrapedContent[] = [];
+
+    if (includeHtml || !includeMarkdown) {
+      contents.push(htmlEntry);
+    }
+
+    let markdownBody: string | undefined;
+    if (includeMarkdown) {
+      try {
+        const markdownResult = await markdownParser.process(payloadBody, job.targetUrl);
+        markdownBody = markdownResult.markdown;
+        contents.push({
+          format: "markdown",
+          contentType: "text/markdown",
+          body: markdownBody,
+          bytes: Buffer.byteLength(markdownBody, "utf8"),
+        });
+      }
+      catch (error) {
+        logger.warn("Markdown conversion failed", {
+          targetUrl: job.targetUrl,
+          jobId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    if (contents.length === 0) {
+      contents.push(htmlEntry);
+    }
+
+    const primaryContent = contents[0];
+
     scrapedPage = {
       url: job.targetUrl,
       title: await page.title(),
-      content: payloadBody,
-      contentType: payloadContentType ?? "text/html",
-      bytes: Buffer.byteLength(payloadBody, "utf8"),
       httpStatusCode,
       startedAt: startedAtIso,
       finishedAt: finishedAtIso,
       durationMs,
       loadStrategy,
+      contents,
       metadata: evaluatedMetadata
         ? {
             description: evaluatedMetadata.description ?? undefined,
@@ -442,18 +495,19 @@ export const runScrapeJob = async (
     logger.info("Scrape job completed successfully", {
       url: job.targetUrl,
       jobId,
-      bytes: scrapedPage.bytes,
+      bytes: primaryContent.bytes,
       status: scrapedPage.httpStatusCode,
       durationMs,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const rawMessage = error instanceof Error ? error.message : String(error);
     finishedAtIso = new Date().toISOString();
     durationMs = Date.now() - startedAtMs;
     failurePageError = mapErrorToPageError(error);
+    failureRawMessage = rawMessage;
     logger.error("Scrape job failed", {
       targetUrl: job.targetUrl,
-      message,
+      message: rawMessage,
       jobId,
       durationMs,
     });
@@ -491,8 +545,9 @@ export const runScrapeJob = async (
     return successEnvelope;
   }
 
-  const fallbackMessage =
+  const friendlyMessage =
     failurePageError ?? "Scrape job completed without a payload";
+  const rawMessageForFailure = failureRawMessage ?? friendlyMessage;
 
   const failureMeta: ScrapeFailureMeta = {
     targetUrl: job.targetUrl,
@@ -504,7 +559,8 @@ export const runScrapeJob = async (
 
   const errorDetail: ScrapeErrorDetail = {
     targetUrl: job.targetUrl,
-    message: mapErrorToPageError(fallbackMessage),
+    message: friendlyMessage,
+    rawMessage: rawMessageForFailure,
     httpStatusCode,
     meta: failureMeta,
   };

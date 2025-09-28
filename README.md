@@ -88,7 +88,8 @@ vercel deploy
   "viewport": { "width": 1366, "height": 768 },
   "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_5_1)…",
   "proxyUrl": "http://proxy:8080",
-  "headers": { "x-tenant": "acme" }
+  "headers": { "x-tenant": "acme" },
+  "outputFormats": ["html", "markdown"]
 }
 ```
 
@@ -98,6 +99,11 @@ sorted for stable caching, and duplicate targets are rejected with a validation
 error. Only `http://` and `https://` origins are accepted; everything else (for
 example `ftp://` or `file://`) is rejected up front so you can fix the payload
 without guessing.
+
+Specify the formats you need in `outputFormats`. Today Micrawl supports `html`
+and `markdown`; defaults remain HTML-only. If you ask for Markdown, the scraper
+automatically disables `captureTextOnly` so the DOM is available for a proper
+conversion.
 
 ### Response at a glance
 
@@ -122,7 +128,9 @@ Payload blocks vary by status:
 
 - `data.page` on `status: "success"` now includes a `metadata` object with
   `description`, `keywords`, `author`, `canonicalUrl`, and a `sameOriginLinks`
-  array for quick link graph traversal.
+  array for quick link graph traversal. The `contents` array lists every
+  requested format as `{ format, contentType, body, bytes }`, so clients can
+  iterate over the formats they asked for (HTML, Markdown, etc.).
 - `errors` on `status: "fail"` (scraper caught the issue and returned details).
 - `message` on `status: "error"` (unexpected exception in the pipeline).
 - `summary` on the final line summarising successes, failures, and error list.
@@ -131,9 +139,13 @@ Payload blocks vary by status:
 {"status":"progress","phase":"queued","jobId":"2f1c...","index":1,"total":1,"targetUrl":"https://example.com/","progress":{"completed":0,"remaining":1,"succeeded":0,"failed":0}}
 {"status":"progress","phase":"navigating","jobId":"2f1c...","index":1,"total":1,"targetUrl":"https://example.com/","progress":{"completed":0,"remaining":1,"succeeded":0,"failed":0}}
 {"status":"progress","phase":"capturing","jobId":"2f1c...","index":1,"total":1,"targetUrl":"https://example.com/","progress":{"completed":0,"remaining":1,"succeeded":0,"failed":0}}
-{"status":"success","phase":"completed","jobId":"2f1c...","index":1,"total":1,"targetUrl":"https://example.com/","progress":{"completed":1,"remaining":0,"succeeded":1,"failed":0},"data":{"page":{"url":"https://example.com/","title":"Example Domain","content":"<html>...","contentType":"text/html","bytes":1280,"httpStatusCode":200,"startedAt":"2025-09-26T17:30:41.128Z","finishedAt":"2025-09-26T17:30:42.042Z","durationMs":914,"loadStrategy":"load-event","metadata":{"description":"Example Domain","keywords":["example"],"author":"Example Team","canonicalUrl":"https://example.com/","sameOriginLinks":["https://example.com/about/"]}}}}
+{"status":"success","phase":"completed","jobId":"2f1c...","index":1,"total":1,"targetUrl":"https://example.com/","progress":{"completed":1,"remaining":0,"succeeded":1,"failed":0},"data":{"page":{"url":"https://example.com/","title":"Example Domain","httpStatusCode":200,"startedAt":"2025-09-26T17:30:41.128Z","finishedAt":"2025-09-26T17:30:42.042Z","durationMs":914,"loadStrategy":"load-event","contents":[{"format":"html","contentType":"text/html","body":"<html>...","bytes":1280}],"metadata":{"description":"Example Domain","keywords":["example"],"author":"Example Team","canonicalUrl":"https://example.com/","sameOriginLinks":["https://example.com/about/"]}}}}
 {"status":"success","phase":"completed","jobId":"2f1c...","index":2,"total":1,"progress":{"completed":1,"remaining":0,"succeeded":1,"failed":0},"summary":{"succeeded":1,"failed":0,"failures":[]}}
 ```
+
+If you request Markdown in addition to HTML you’ll see a second entry inside
+`data.page.contents` with `format: "markdown"` (body contains the Markdown
+string, `contentType` is `text/markdown`).
 
 ### Why streaming instead of async?
 
@@ -143,6 +155,21 @@ Traditional scraper APIs either block until every URL finishes or force you into
 2. **Lower peak memory** – you can process pages incrementally instead of buffering an entire batch.
 
 If you prefer the old-school “single JSON response,” just buffer the lines until you consume the summary, then parse the combined output.
+
+### Keeping payloads LLM-friendly
+
+Token counts matter when the output is headed straight into an LLM. A few tips to
+minimise the size Micrawl streams back:
+
+- Request only the formats you need. `outputFormats: ["markdown"]` emits a
+  single Markdown entry (via h2m-parser) and skips the HTML entirely. If you
+  ask for `"html"` and `"markdown"`, both show up in `contents`.
+- For the absolute smallest payload, set `captureTextOnly: true` and leave
+  `outputFormats` at its default. You’ll receive plain text extracted from the
+  page (`contents[0].body`) with no tags. (Markdown requires the DOM, so it’s
+  mutually exclusive with `captureTextOnly: true`).
+- Strip anything you don’t plan to consume—headers, proxies, and other optional
+  knobs should stay unset unless needed so your requests stay small and fast.
 
 ### Reading the stream step-by-step
 
@@ -192,7 +219,12 @@ for await (const line of rl) {
   }
 
   if (record.status === "success" && record.data?.page) {
-    console.log(`[${record.index}/${record.total}] ✅`, record.targetUrl, record.progress);
+    for (const content of record.data.page.contents ?? []) {
+      console.log(
+        `[${record.index}/${record.total}] ✅ ${record.targetUrl} (${content.format})`,
+        `${content.bytes} bytes`,
+      );
+    }
   } else if (record.status === "fail") {
     console.warn(`[${record.index}/${record.total}] ❌`, record.targetUrl, record.errors);
   } else {
@@ -227,7 +259,11 @@ for raw in resp.iter_lines():
         continue
 
     if record["status"] == "success" and "data" in record:
-        print(f"{record['index']}/{record['total']} ✅ {record.get('targetUrl')}", record["progress"])
+        for content in record["data"]["page"].get("contents", []):
+            print(
+                f"{record['index']}/{record['total']} ✅ {record.get('targetUrl')} ({content['format']})",
+                f"{content['bytes']} bytes",
+            )
     elif record["status"] == "fail":
         print(f"{record['index']}/{record['total']} ❌ {record.get('targetUrl')}: {record['errors']}")
     else:

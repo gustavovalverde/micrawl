@@ -2,6 +2,8 @@ export type LoadStrategy = "load-event" | "wait-for-selector";
 
 export type ScrapePhase = "queued" | "navigating" | "capturing" | "completed";
 
+export type ContentFormat = "html" | "markdown";
+
 export interface ScrapeJob {
   targetUrl: string;
   waitForSelector?: string;
@@ -20,19 +22,18 @@ export interface ScrapeJob {
   userAgent?: string;
   outboundProxyUrl?: string;
   headerOverrides?: Record<string, string>;
+  outputFormats?: ContentFormat[];
 }
 
 export interface ScrapedPage {
   url: string;
   title: string | null;
-  content: string;
-  contentType: string;
-  bytes: number;
   httpStatusCode?: number;
   startedAt: string;
   finishedAt: string;
   durationMs: number;
   loadStrategy: LoadStrategy;
+  contents: ScrapedContent[];
   metadata?: ScrapedMetadata;
 }
 
@@ -42,6 +43,13 @@ export interface ScrapedMetadata {
   author?: string;
   canonicalUrl?: string;
   sameOriginLinks: string[];
+}
+
+export interface ScrapedContent {
+  format: ContentFormat;
+  contentType: string;
+  body: string;
+  bytes: number;
 }
 
 export interface ScrapeFailureMeta {
@@ -55,6 +63,7 @@ export interface ScrapeFailureMeta {
 export interface ScrapeErrorDetail {
   targetUrl: string;
   message: string;
+  rawMessage?: string;
   httpStatusCode?: number;
   meta?: ScrapeFailureMeta;
 }
@@ -94,6 +103,7 @@ export interface ScrapeFailure extends ScrapeRecordBase {
 export interface ScrapeError extends ScrapeRecordBase {
   status: "error";
   message: string;
+  rawMessage?: string;
 }
 
 export interface ScrapeSummary extends ScrapeRecordBase {

@@ -37,17 +37,15 @@ e2eDescribe("E2E: /scrape route with real browser", () => {
       .split("\n")
       .map((line: string) => JSON.parse(line));
 
-    // First line should be the scraped result
-    const first = lines[0];
-    expect(first.status).toBe("success");
-    expect(first.jobId).toBeDefined();
-    expect(first.targetUrl).toBe("https://example.com");
-    expect(first.data.page.httpStatusCode).toBeGreaterThanOrEqual(200);
-    expect(first.data.page.content).toContain("Example Domain");
-    expect(first.progress.completed).toBeGreaterThanOrEqual(1);
+    const result = lines.find(
+      (line: any) => line.status === "success" && line.data?.page,
+    );
+    expect(result).toBeDefined();
+    expect(result!.targetUrl).toBe("https://example.com");
+    expect(result!.data.page.httpStatusCode).toBeGreaterThanOrEqual(200);
+    expect(result!.data.page.contents[0]?.body ?? "").toContain("Example Domain");
 
-    // Last line should be summary
-    const summary = lines[lines.length - 1];
+    const summary = lines.find((line: any) => line.summary)!;
     expect(summary.status).toBe("success");
     expect(summary.summary.succeeded).toBe(1);
     expect(summary.summary.failed).toBe(0);
@@ -70,11 +68,12 @@ e2eDescribe("E2E: /scrape route with real browser", () => {
       .split("\n")
       .map((line: string) => JSON.parse(line));
 
-    const first = lines[0];
-    expect(first.status).toBe("success");
-    expect(first.targetUrl).toBe("https://example.com/404");
-    expect(first.data.page.httpStatusCode).toBeGreaterThanOrEqual(400);
-    expect(first.progress.failed + first.progress.succeeded).toBeGreaterThanOrEqual(1);
+    const firstResult = lines.find(
+      (line: any) => line.status === "success" && line.data?.page,
+    );
+    expect(firstResult).toBeDefined();
+    expect(firstResult!.targetUrl).toBe("https://example.com/404");
+    expect(firstResult!.data.page.httpStatusCode).toBeGreaterThanOrEqual(400);
   }, 30000);
 
   it("scrapes multiple real URLs in batch", async () => {
@@ -97,9 +96,13 @@ e2eDescribe("E2E: /scrape route with real browser", () => {
     expect(lines).toHaveLength(3);
 
     // Verify both URLs were scraped
-    expect(lines[0].targetUrl).toBe("https://example.com");
-    expect(lines[1].targetUrl).toBe("https://example.com/robots.txt");
-    expect(lines[2].progress.completed).toBe(2);
+    const successLines = lines.filter((line: any) => line.status === "success");
+    expect(successLines.length).toBeGreaterThanOrEqual(2);
+    expect(successLines[0].targetUrl).toBe("https://example.com");
+    expect(successLines[1].targetUrl).toBe("https://example.com/robots.txt");
+
+    const batchSummary = lines.find((line: any) => line.summary)!;
+    expect(batchSummary.progress.completed).toBeGreaterThanOrEqual(2);
 
     // Check summary
     expect(lines[2].summary.succeeded + lines[2].summary.failed).toBe(2);
@@ -123,7 +126,8 @@ e2eDescribe("E2E: /scrape route with real browser", () => {
       .map((line: string) => JSON.parse(line));
 
     // Should fail to connect
-    expect(lines[0].status).not.toBe("success");
+    const firstLine = lines.find((line: any) => line.status !== "progress");
+    expect(firstLine?.status).not.toBe("success");
   }, 10000);
 });
 

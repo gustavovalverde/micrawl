@@ -13,11 +13,20 @@ import type {
   ScrapePhase,
   ScrapeProgressUpdate,
   ScrapeSummary,
+  ContentFormat,
 } from "./types/scrape.js";
 
 const runtimeConfig = getEnv();
 
 const SUPPORTED_PROTOCOLS = new Set(["http:", "https:"]);
+
+const SUPPORTED_OUTPUT_FORMATS = ["html", "markdown"] as const;
+const OUTPUT_FORMAT_SET = new Set<ContentFormat>(SUPPORTED_OUTPUT_FORMATS);
+
+const outputFormatValueSchema = z.preprocess(
+  (value) => (typeof value === "string" ? value.trim().toLowerCase() : value),
+  z.enum(SUPPORTED_OUTPUT_FORMATS),
+);
 
 const normalizeTargetUrls = (
   urls: string[],
@@ -135,6 +144,17 @@ export const scrapeRequestSchema = z
     userAgent: z.string().trim().min(1).optional(),
     proxyUrl: z.string().url().optional(),
     headers: headerOverridesSchema,
+    outputFormats: z
+      .array(outputFormatValueSchema)
+      .transform((formats) => {
+        const deduped: ContentFormat[] = [];
+        for (const format of formats) {
+          if (!deduped.includes(format)) deduped.push(format);
+        }
+        return deduped.length > 0 ? deduped : ["html"];
+      })
+      .optional()
+      .transform((formats) => (formats ?? ["html"])) as z.ZodType<ContentFormat[]>,
   })
   .strict();
 
@@ -153,6 +173,7 @@ export const buildScrapeJob = (
   userAgent: request.userAgent,
   outboundProxyUrl: request.proxyUrl,
   headerOverrides: request.headers,
+  outputFormats: request.outputFormats,
 });
 
 /**
@@ -192,6 +213,13 @@ export const registerRoutes = (app: Hono) => {
     async (c) => {
       const jobRequest = c.req.valid("json");
 
+      const outputFormats = jobRequest.outputFormats ?? ["html"];
+      const requiresDom = outputFormats.some((format) => format !== "html");
+      const effectiveRequest =
+        requiresDom && jobRequest.captureTextOnly
+          ? { ...jobRequest, captureTextOnly: false }
+          : jobRequest;
+
       if (jobRequest.mode === "async") {
         return c.json(
           {
@@ -202,15 +230,22 @@ export const registerRoutes = (app: Hono) => {
         );
       }
 
+      if (requiresDom && jobRequest.captureTextOnly) {
+        logger.debug("Overriding captureTextOnly to false for DOM-dependent formats", {
+          requestedFormats: outputFormats,
+        });
+      }
+
       const jobId = randomUUID();
-      const scrapeJobs = jobRequest.urls.map((url) =>
-        buildScrapeJob(jobRequest, url),
+      const scrapeJobs = effectiveRequest.urls.map((url) =>
+        buildScrapeJob(effectiveRequest, url),
       );
 
       logger.info("Accepted scrape batch", {
         jobId,
         totalJobs: scrapeJobs.length,
-        captureTextOnly: jobRequest.captureTextOnly,
+        captureTextOnly: effectiveRequest.captureTextOnly,
+        outputFormats,
       });
 
       return streamText(c, async (stream) => {
@@ -293,18 +328,20 @@ export const registerRoutes = (app: Hono) => {
               }),
             );
           } catch (error) {
-            const message =
+            const rawMessage =
               error instanceof Error ? error.message : String(error);
+            const friendlyMessage = rawMessage;
             summary.failed += 1;
             failedCount += 1;
             summary.failures.push({
               targetUrl: job.targetUrl,
-              message,
+              message: friendlyMessage,
+              rawMessage,
             });
             logger.error("Unexpected error while scraping target", {
               jobId,
               targetUrl: job.targetUrl,
-              error: message,
+              error: rawMessage,
             });
             const progress = {
               completed: sequence,
@@ -318,7 +355,8 @@ export const registerRoutes = (app: Hono) => {
               index: sequence,
               total: totalJobs,
               targetUrl: job.targetUrl,
-              message,
+              message: friendlyMessage,
+              rawMessage,
               progress,
               phase: "completed",
             };

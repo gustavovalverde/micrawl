@@ -134,4 +134,38 @@ describe("runScrapeJob runtime behaviour", () => {
     expect(page.close).toHaveBeenCalled();
     expect(context.close).toHaveBeenCalled();
   });
+
+  it("generates markdown content when requested", async () => {
+    const { page } = setupScraperMocks();
+    const { runScrapeJob } = await import("../src/scraper.js");
+
+    page.content.mockResolvedValueOnce(
+      "<html><head><title>Hello Page</title></head><body><h1>Hello</h1><p>World.</p></body></html>",
+    );
+
+    const job = {
+      targetUrl: "https://example.com",
+      captureTextOnly: false,
+      timeoutMs: 5_000,
+      outputFormats: ["markdown" as const],
+    };
+
+    const result = await runScrapeJob(job, "job-markdown", {
+      index: 1,
+      total: 1,
+      targetUrl: job.targetUrl,
+    });
+
+    expect(result.status).toBe("success");
+    if (result.status !== "success") return;
+
+    const contents = result.data.page.contents;
+    expect(contents).toHaveLength(1);
+    const markdownEntry = contents[0];
+    expect(markdownEntry.format).toBe("markdown");
+    expect(markdownEntry.contentType).toBe("text/markdown");
+    expect(markdownEntry.body).toContain("# Hello");
+    expect(markdownEntry.body).toContain("World.");
+    expect(markdownEntry.body).not.toContain("<h1>");
+  });
 });
