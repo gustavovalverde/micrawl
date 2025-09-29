@@ -3,9 +3,9 @@ import { zValidator } from "@hono/zod-validator";
 import type { Hono } from "hono";
 import { streamText } from "hono/streaming";
 import { z } from "zod";
-import { getEnv } from "./env.js";
+import { getEnv } from "./config/index.js";
 import { logger } from "./logger.js";
-import { runScrapeJob, verifyChromiumLaunch } from "./scraper.js";
+import { runScrapeJob, verifyChromiumLaunch, resolveDriverName } from "./scraper.js";
 import type {
   ContentFormat,
   ScrapeError,
@@ -14,6 +14,7 @@ import type {
   ScrapePhase,
   ScrapeProgressUpdate,
   ScrapeSummary,
+  ScrapeDriverName,
 } from "./types/scrape.js";
 
 const runtimeConfig = getEnv();
@@ -22,6 +23,8 @@ const SUPPORTED_PROTOCOLS = new Set(["http:", "https:"]);
 
 const SUPPORTED_OUTPUT_FORMATS = ["html", "markdown"] as const;
 const _OUTPUT_FORMAT_SET = new Set<ContentFormat>(SUPPORTED_OUTPUT_FORMATS);
+
+const driverValueSchema = z.enum(["playwright", "http", "auto"]).catch(runtimeConfig.SCRAPER_DEFAULT_DRIVER);
 
 const outputFormatValueSchema = z.preprocess(
   (value) => (typeof value === "string" ? value.trim().toLowerCase() : value),
@@ -144,6 +147,7 @@ export const scrapeRequestSchema = z
     userAgent: z.string().trim().min(1).optional(),
     proxyUrl: z.string().url().optional(),
     headers: headerOverridesSchema,
+    driver: driverValueSchema.optional(),
     outputFormats: z
       .array(outputFormatValueSchema)
       .transform((formats) => {
@@ -176,6 +180,7 @@ export const buildScrapeJob = (
   outboundProxyUrl: request.proxyUrl,
   headerOverrides: request.headers,
   outputFormats: request.outputFormats,
+  driver: request.driver ?? runtimeConfig.SCRAPER_DEFAULT_DRIVER,
 });
 
 /**
@@ -259,6 +264,7 @@ export const registerRoutes = (app: Hono) => {
           succeeded: 0,
           failed: 0,
           failures: [] as ScrapeErrorDetail[],
+          drivers: {} as Partial<Record<ScrapeDriverName, number>>,
         };
 
         let succeededCount = 0;
@@ -271,6 +277,12 @@ export const registerRoutes = (app: Hono) => {
             total: totalJobs,
             targetUrl: job.targetUrl,
           } as const;
+
+          const driverName = resolveDriverName(job);
+
+          const tallyDriver = () => {
+            summary.drivers[driverName] = (summary.drivers[driverName] ?? 0) + 1;
+          };
 
           const captureProgressSnapshot = (completedCount: number) => ({
             completed: completedCount,
@@ -291,6 +303,7 @@ export const registerRoutes = (app: Hono) => {
               total: totalJobs,
               targetUrl: job.targetUrl,
               phase,
+              driver: driverName,
               progress: snapshot,
             };
             await stream.writeln(JSON.stringify(payload));
@@ -304,10 +317,11 @@ export const registerRoutes = (app: Hono) => {
               jobId,
               position,
               async (phase) => {
-                if (phase === "completed") return;
                 await emitPhaseUpdate(phase);
               },
             );
+
+            tallyDriver();
 
             if (record.status === "success") {
               summary.succeeded += 1;
@@ -354,6 +368,7 @@ export const registerRoutes = (app: Hono) => {
               succeeded: succeededCount,
               failed: failedCount,
             };
+            tallyDriver();
             const payload: ScrapeError = {
               status: "error",
               jobId,
@@ -364,6 +379,7 @@ export const registerRoutes = (app: Hono) => {
               rawMessage,
               progress,
               phase: "completed",
+              driver: driverName,
             };
             await stream.writeln(JSON.stringify(payload));
           }
@@ -391,6 +407,7 @@ export const registerRoutes = (app: Hono) => {
             succeeded: summary.succeeded,
             failed: summary.failed,
             failures: summary.failures,
+            drivers: summary.drivers,
           },
           phase: "completed",
         };

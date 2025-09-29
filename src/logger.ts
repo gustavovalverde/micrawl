@@ -1,4 +1,4 @@
-import { isProduction } from "./env.js";
+import { isProduction } from "./config/index.js";
 
 type Level = "debug" | "info" | "warn" | "error";
 

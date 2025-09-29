@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ScrapeJob } from "../src/types/scrape.js";
+import type { ScrapeJob, ScrapeFailure, ScrapeSuccess } from "../src/types/scrape.js";
 
 const originalEnv = { ...process.env };
 
@@ -11,6 +11,7 @@ const withEnv = async () => {
   process.env.SCRAPER_DEFAULT_VIEWPORT_WIDTH = "1920";
   process.env.SCRAPER_DEFAULT_VIEWPORT_HEIGHT = "1080";
   process.env.SCRAPER_DEFAULT_USER_AGENT = "TestUA/1.0";
+  process.env.SCRAPER_DEFAULT_DRIVER = "playwright";
   return import("../src/scraper.js");
 };
 
@@ -89,5 +90,159 @@ describe("buildExtraHeaders", () => {
     const headers = buildExtraHeaders(baseJob);
 
     expect(headers).toEqual({});
+  });
+});
+
+
+describe("playwrightDriver", () => {
+  it("exposes the Playwright driver for reuse", async () => {
+    const { playwrightDriver, runPlaywrightScrape, verifyChromiumLaunch, closeSharedBrowser } = await withEnv();
+
+    expect(playwrightDriver.name).toBe("playwright");
+    expect(playwrightDriver.run).toBe(runPlaywrightScrape);
+    expect(playwrightDriver.verify).toBe(verifyChromiumLaunch);
+    expect(playwrightDriver.close).toBe(closeSharedBrowser);
+  });
+});
+
+describe("runScrapeJob", () => {
+  it("delegates to the HTTP driver when requested", async () => {
+    const { runScrapeJob, httpDriver } = await withEnv();
+
+    const success: ScrapeSuccess = {
+      status: "success",
+      jobId: "job-1",
+      index: 1,
+      total: 1,
+      targetUrl: "https://example.com",
+      phase: "completed",
+      data: {
+        page: {
+          url: "https://example.com",
+          title: "Example",
+          httpStatusCode: 200,
+          startedAt: new Date().toISOString(),
+          finishedAt: new Date().toISOString(),
+          durationMs: 1,
+          loadStrategy: "load-event",
+          contents: [],
+        },
+      },
+    };
+
+    const spy = vi
+      .spyOn(httpDriver, "run")
+      .mockResolvedValue(success);
+
+    const job: ScrapeJob = {
+      targetUrl: "https://example.com",
+      captureTextOnly: true,
+      timeoutMs: 5000,
+      driver: "http",
+    };
+
+    const result = await runScrapeJob(job, "job-1", {
+      index: 1,
+      total: 1,
+      targetUrl: job.targetUrl,
+    });
+
+    expect(spy).toHaveBeenCalled();
+    expect(result).toEqual({ ...success, driver: "http" });
+    spy.mockRestore();
+  });
+
+  it("falls back to Playwright when driver is omitted", async () => {
+    const { runScrapeJob, playwrightDriver } = await withEnv();
+
+    const failure: ScrapeFailure = {
+      status: "fail",
+      jobId: "job-2",
+      index: 1,
+      total: 1,
+      targetUrl: "https://example.com",
+      phase: "completed",
+      errors: [
+        {
+          targetUrl: "https://example.com",
+          message: "boom",
+          rawMessage: "boom",
+          meta: {
+            targetUrl: "https://example.com",
+            startedAt: new Date().toISOString(),
+            finishedAt: new Date().toISOString(),
+            durationMs: 1,
+            loadStrategy: "load-event",
+          },
+        },
+      ],
+    };
+
+    const spy = vi
+      .spyOn(playwrightDriver, "run")
+      .mockResolvedValue(failure);
+
+    const job: ScrapeJob = {
+      targetUrl: "https://example.com",
+      captureTextOnly: true,
+      timeoutMs: 5000,
+    };
+
+    const result = await runScrapeJob(job, "job-2", {
+      index: 1,
+      total: 1,
+      targetUrl: job.targetUrl,
+    });
+
+    expect(spy).toHaveBeenCalled();
+    expect(result).toEqual({ ...failure, driver: "playwright" });
+    spy.mockRestore();
+  });
+});
+
+describe("resolveDriverName", () => {
+  it("chooses http for auto captureTextOnly jobs", async () => {
+    const { resolveDriverName } = await withEnv();
+    const result = resolveDriverName({
+      ...baseJob,
+      captureTextOnly: true,
+      timeoutMs: 5000,
+      driver: "auto",
+    });
+    expect(result).toBe("http");
+  });
+
+  it("chooses playwright when waitForSelector is provided", async () => {
+    const { resolveDriverName } = await withEnv();
+    const result = resolveDriverName({
+      ...baseJob,
+      captureTextOnly: true,
+      waitForSelector: "#main",
+      timeoutMs: 5000,
+      driver: "auto",
+    });
+    expect(result).toBe("playwright");
+  });
+
+  it("chooses playwright when captureTextOnly is false", async () => {
+    const { resolveDriverName } = await withEnv();
+    const result = resolveDriverName({
+      ...baseJob,
+      captureTextOnly: false,
+      timeoutMs: 5000,
+      driver: "auto",
+    });
+    expect(result).toBe("playwright");
+  });
+});
+
+
+describe("resolveDriverName default", () => {
+  it("uses SCRAPER_DEFAULT_DRIVER when driver hint is omitted", async () => {
+    await withEnv();
+    process.env.SCRAPER_DEFAULT_DRIVER = "http";
+    vi.resetModules();
+    const { resolveDriverName: resolveWithHttp } = await import("../src/scraper.js");
+    expect(resolveWithHttp({ ...baseJob, driver: undefined })).toBe("http");
   });
 });

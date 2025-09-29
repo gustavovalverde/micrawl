@@ -89,6 +89,7 @@ vercel deploy
   "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_5_1)…",
   "proxyUrl": "http://proxy:8080",
   "headers": { "x-tenant": "acme" },
+  "driver": "auto",
   "outputFormats": ["html", "markdown"]
 }
 ```
@@ -104,6 +105,8 @@ Specify the formats you need in `outputFormats`. Today Micrawl supports `html`
 and `markdown`; defaults remain HTML-only. If you ask for Markdown, the scraper
 automatically disables `captureTextOnly` so the DOM is available for a proper
 conversion.
+
+Set `driver` to `playwright`, `http`, or `auto` (default `playwright`). The HTTP driver skips browser launch for lightweight pages, while `auto` chooses HTTP when the payload is text-only with no DOM requirements and otherwise falls back to Playwright.
 
 ### Response at a glance
 
@@ -122,6 +125,7 @@ All records include:
   the time the record was emitted so dashboards can update without manual math.
 - `phase`: current scrape phase; `progress` lines report `queued`, `navigating`,
   or `capturing`, while terminal records and the summary use `completed`.
+- `driver`: the effective driver that ran the job (`playwright` or `http`).
 - `targetUrl`: the normalized URL being processed (omitted on the summary).
 
 Payload blocks vary by status:
@@ -139,8 +143,8 @@ Payload blocks vary by status:
 {"status":"progress","phase":"queued","jobId":"2f1c...","index":1,"total":1,"targetUrl":"https://example.com/","progress":{"completed":0,"remaining":1,"succeeded":0,"failed":0}}
 {"status":"progress","phase":"navigating","jobId":"2f1c...","index":1,"total":1,"targetUrl":"https://example.com/","progress":{"completed":0,"remaining":1,"succeeded":0,"failed":0}}
 {"status":"progress","phase":"capturing","jobId":"2f1c...","index":1,"total":1,"targetUrl":"https://example.com/","progress":{"completed":0,"remaining":1,"succeeded":0,"failed":0}}
-{"status":"success","phase":"completed","jobId":"2f1c...","index":1,"total":1,"targetUrl":"https://example.com/","progress":{"completed":1,"remaining":0,"succeeded":1,"failed":0},"data":{"page":{"url":"https://example.com/","title":"Example Domain","httpStatusCode":200,"startedAt":"2025-09-26T17:30:41.128Z","finishedAt":"2025-09-26T17:30:42.042Z","durationMs":914,"loadStrategy":"load-event","contents":[{"format":"html","contentType":"text/html","body":"<html>...","bytes":1280}],"metadata":{"description":"Example Domain","keywords":["example"],"author":"Example Team","canonicalUrl":"https://example.com/","sameOriginLinks":["https://example.com/about/"]}}}}
-{"status":"success","phase":"completed","jobId":"2f1c...","index":2,"total":1,"progress":{"completed":1,"remaining":0,"succeeded":1,"failed":0},"summary":{"succeeded":1,"failed":0,"failures":[]}}
+{"status":"success","phase":"completed","jobId":"2f1c...","index":1,"total":1,"targetUrl":"https://example.com/","driver":"playwright","progress":{"completed":1,"remaining":0,"succeeded":1,"failed":0},"data":{"page":{"url":"https://example.com/","title":"Example Domain","httpStatusCode":200,"startedAt":"2025-09-26T17:30:41.128Z","finishedAt":"2025-09-26T17:30:42.042Z","durationMs":914,"loadStrategy":"load-event","contents":[{"format":"html","contentType":"text/html","body":"<html>...","bytes":1280}],"metadata":{"description":"Example Domain","keywords":["example"],"author":"Example Team","canonicalUrl":"https://example.com/","sameOriginLinks":["https://example.com/about/"]}}}}
+{"status":"success","phase":"completed","jobId":"2f1c...","index":2,"total":1,"progress":{"completed":1,"remaining":0,"succeeded":1,"failed":0},"summary":{"succeeded":1,"failed":0,"drivers":{"playwright":1},"failures":[]}}
 ```
 
 If you request Markdown in addition to HTML you’ll see a second entry inside
@@ -297,7 +301,7 @@ browser processes between runs.
 
 ## Configuration
 
-All environment variables are documented and validated in `src/env.ts`:
+All environment variables are documented and validated in `src/config/env.ts`:
 
 - `SCRAPER_DEFAULT_TIMEOUT_MS` (default `45000`)
 - `SCRAPER_TEXT_ONLY_DEFAULT` (default `true`)
@@ -307,6 +311,7 @@ All environment variables are documented and validated in `src/env.ts`:
 - `SCRAPER_DEFAULT_VIEWPORT_WIDTH` (default `1920`)
 - `SCRAPER_DEFAULT_VIEWPORT_HEIGHT` (default `1080`)
 - `SCRAPER_DEFAULT_USER_AGENT` (optional explicit UA; otherwise `user-agents` generates one)
+- `SCRAPER_DEFAULT_DRIVER` (default `playwright`; choose `http`, `playwright`, or `auto` when a request omits the `driver` field)
 - `SCRAPER_HEALTHCHECK_URL` (default `https://example.com/`; used by `/health` to verify outbound navigation)
 - `CHROMIUM_BINARY` (optional path override for the Chromium executable)
 

@@ -4,11 +4,14 @@ export type ScrapePhase = "queued" | "navigating" | "capturing" | "completed";
 
 export type ContentFormat = "html" | "markdown";
 
+export type ScrapeDriverName = "playwright" | "http" | "auto";
+
 export interface ScrapeJob {
   targetUrl: string;
   waitForSelector?: string;
   captureTextOnly: boolean;
   timeoutMs: number;
+  driver?: ScrapeDriverName;
   basicAuthCredentials?: {
     username: string;
     password: string;
@@ -72,6 +75,7 @@ export interface ScrapeRecordBase {
   status: "success" | "fail" | "error" | "progress";
   targetUrl?: string;
   jobId: string;
+  driver?: ScrapeDriverName;
   index: number;
   total: number;
   phase?: ScrapePhase;
@@ -112,6 +116,7 @@ export interface ScrapeSummary extends ScrapeRecordBase {
     succeeded: number;
     failed: number;
     failures: ScrapeErrorDetail[];
+    drivers: Partial<Record<ScrapeDriverName, number>>;
   };
 }
 

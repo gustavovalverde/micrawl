@@ -10,13 +10,15 @@ import type {
 } from "../src/types/scrape.js";
 
 // Mock the scraper module with functions directly in the factory
-vi.mock("../src/scraper.js", () => ({
-  runScrapeJob: vi.fn(),
-  verifyChromiumLaunch: vi.fn(),
-  buildContextOptions: vi.fn(),
-  buildExtraHeaders: vi.fn(),
-  closeSharedBrowser: vi.fn().mockResolvedValue(undefined),
-}));
+vi.mock("../src/scraper.js", async () => {
+  const actual = await vi.importActual<typeof import("../src/scraper.js")>("../src/scraper.js");
+  return {
+    ...actual,
+    runScrapeJob: vi.fn(),
+    verifyChromiumLaunch: vi.fn(),
+    closeSharedBrowser: vi.fn().mockResolvedValue(undefined),
+  };
+});
 
 // Import after mocking
 import { createApp } from "../src/index.js";
@@ -51,6 +53,7 @@ describe("/scrape route", () => {
 
         return {
           status: "success",
+          driver: "playwright",
           jobId,
           index: meta.index,
           total: meta.total,
@@ -122,6 +125,7 @@ describe("/scrape route", () => {
     expect(result.total).toBe(1);
     expect(result.targetUrl).toBe("https://example.com/");
     expect(result.phase).toBe("completed");
+    expect(result.driver).toBe("playwright");
     expect(result.progress).toMatchObject({
       completed: 1,
       remaining: 0,
@@ -151,6 +155,7 @@ describe("/scrape route", () => {
     if (!summary) return;
     expect(summary.status).toBe("success");
     expect(summary.phase).toBe("completed");
+    expect(summary.summary.drivers).toEqual({ playwright: 1 });
     expect(summary.index).toBe(2);
     expect(summary.total).toBe(1);
     expect(summary.progress).toMatchObject({
@@ -162,6 +167,7 @@ describe("/scrape route", () => {
     expect(summary.summary).toMatchObject({
       succeeded: 1,
       failed: 0,
+      drivers: { playwright: 1 },
     });
     expect(runScrapeJobMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -178,6 +184,51 @@ describe("/scrape route", () => {
     );
   });
 
+  it("passes driver hints through to the scraper", async () => {
+    const success: ScrapeSuccess = {
+      status: "success",
+      driver: "http",
+      jobId: "job-driver",
+      index: 1,
+      total: 1,
+      targetUrl: "https://example.com/",
+      phase: "completed",
+      progress: { completed: 1, remaining: 0, succeeded: 1, failed: 0 },
+      data: {
+        page: {
+          url: "https://example.com/",
+          title: "Example",
+          httpStatusCode: 200,
+          startedAt: new Date().toISOString(),
+          finishedAt: new Date().toISOString(),
+          durationMs: 10,
+          loadStrategy: "load-event",
+          contents: [],
+          metadata: {
+            sameOriginLinks: [],
+          },
+        },
+      },
+    } as ScrapeSuccess;
+
+    runScrapeJobMock.mockResolvedValueOnce(success);
+
+    const res = await client.scrape.$post({
+      json: {
+        urls: ["https://example.com"],
+        driver: "http",
+      },
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(runScrapeJobMock).toHaveBeenCalledTimes(1);
+    const jobArg = runScrapeJobMock.mock.calls[0]?.[0];
+    expect(jobArg?.driver).toBe("http");
+    const summary = parseStreamLines(body).at(-1) as ScrapeSummary | undefined;
+    expect(summary?.summary.drivers).toEqual({ http: 1 });
+  });
+
   it("streams markdown payload when requested", async () => {
     runScrapeJobMock.mockImplementationOnce(
       async (job, jobId, meta, reportPhase) => {
@@ -189,6 +240,7 @@ describe("/scrape route", () => {
 
         return {
           status: "success",
+          driver: "playwright",
           jobId,
           index: meta.index,
           total: meta.total,
@@ -278,6 +330,7 @@ describe("/scrape route", () => {
     });
 
     expect(summary.summary.failed).toBe(1);
+    expect(summary.summary.drivers).toEqual({ playwright: 1 });
     expect(summary.phase).toBe("completed");
   });
 
