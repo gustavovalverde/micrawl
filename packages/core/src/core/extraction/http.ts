@@ -18,11 +18,6 @@ import type {
 } from "../../types/scrape-driver.js";
 import { buildExtraHeaders } from "./shared.js";
 
-const markdownParser = new H2MParser({
-  extract: { readability: false },
-  markdown: { linkStyle: "inline" },
-});
-
 const DEFAULT_CONTENT_TYPE = "text/html";
 
 const notifyPhase = async (
@@ -305,7 +300,11 @@ export const runHttpScrape: ScrapeDriver["run"] = async (
 
     if (formats.includes("markdown")) {
       try {
-        const result = await markdownParser.process(html, job.targetUrl);
+        const parser = new H2MParser({
+          extract: { readability: job.readability ?? true },
+          markdown: { linkStyle: "inline" },
+        });
+        const result = await parser.process(html, job.targetUrl);
         markdown = result.markdown;
       } catch (error) {
         logger.warn("HTTP markdown conversion failed", {

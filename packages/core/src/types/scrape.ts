@@ -26,6 +26,7 @@ export interface ScrapeJob {
   outboundProxyUrl?: string;
   headerOverrides?: Record<string, string>;
   outputFormats?: ContentFormat[];
+  readability?: boolean;
 }
 
 export interface ScrapedPage {

@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { zValidator } from "@hono/zod-validator";
 import type { Hono } from "hono";
-import { streamText } from "hono/streaming";
+import { stream } from "hono/streaming";
 import { z } from "zod";
 import { getEnv } from "./config/index.js";
 import { logger } from "./logger.js";
-import { runScrapeJob, verifyChromiumLaunch, resolveDriverName } from "./scraper.js";
+import { runScrapeJob, verifyChromiumLaunch, resolveDriverName, canonicalizeUrl, UrlNormalizationError } from "./scraper.js";
 import type {
   ContentFormat,
   ScrapeError,
@@ -15,11 +15,9 @@ import type {
   ScrapeProgressUpdate,
   ScrapeSummary,
   ScrapeDriverName,
-} from "./types/scrape.js";
+} from "@micrawl/core/types";
 
 const runtimeConfig = getEnv();
-
-const SUPPORTED_PROTOCOLS = new Set(["http:", "https:"]);
 
 const SUPPORTED_OUTPUT_FORMATS = ["html", "markdown"] as const;
 const _OUTPUT_FORMAT_SET = new Set<ContentFormat>(SUPPORTED_OUTPUT_FORMATS);
@@ -39,43 +37,27 @@ const normalizeTargetUrls = (
   const seen = new Set<string>();
 
   urls.forEach((rawUrl, index) => {
-    let parsed: URL;
+    let canonical: string;
 
     try {
-      parsed = new URL(rawUrl);
-    } catch {
+      canonical = canonicalizeUrl(rawUrl);
+    } catch (error) {
+      if (error instanceof UrlNormalizationError) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: error.message,
+          path: ["urls", index],
+        });
+        return;
+      }
+
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: `Invalid URL: ${rawUrl}`,
+        message: `Failed to normalize URL: ${rawUrl}`,
         path: ["urls", index],
       });
       return;
     }
-
-    if (!SUPPORTED_PROTOCOLS.has(parsed.protocol)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: `Unsupported URL protocol: ${parsed.protocol}`,
-        path: ["urls", index],
-      });
-      return;
-    }
-
-    parsed.hash = "";
-
-    if (parsed.pathname !== "/") {
-      const trimmedPath = parsed.pathname.replace(/\/+$/, "");
-      parsed.pathname = trimmedPath === "" ? "/" : trimmedPath;
-    }
-
-    if (parsed.search) {
-      parsed.searchParams.sort();
-      parsed.search = parsed.searchParams.toString()
-        ? `?${parsed.searchParams.toString()}`
-        : "";
-    }
-
-    const canonical = parsed.toString();
 
     if (seen.has(canonical)) {
       ctx.addIssue({
@@ -128,6 +110,7 @@ export const scrapeRequestSchema = z
       .transform((value, ctx) => normalizeTargetUrls(value, ctx)),
     mode: z.enum(["sync", "async"]).catch("sync"),
     captureTextOnly: z.boolean().catch(runtimeConfig.SCRAPER_TEXT_ONLY_DEFAULT),
+    readability: z.boolean().optional().default(true),
     waitForSelector: z.string().trim().min(1).optional(),
     timeoutMs: z.coerce
       .number()
@@ -171,6 +154,7 @@ export const buildScrapeJob = (
   targetUrl,
   waitForSelector: request.waitForSelector,
   captureTextOnly: request.captureTextOnly,
+  readability: request.readability,
   timeoutMs: request.timeoutMs,
   basicAuthCredentials: request.basicAuth,
   locale: request.locale,
@@ -258,7 +242,10 @@ export const registerRoutes = (app: Hono) => {
         outputFormats,
       });
 
-      return streamText(c, async (stream) => {
+      return stream(c, async (stream) => {
+        stream.onAbort(() => {
+          logger.info("Client aborted scrape stream", { jobId });
+        });
         const totalJobs = scrapeJobs.length;
         const summary = {
           succeeded: 0,

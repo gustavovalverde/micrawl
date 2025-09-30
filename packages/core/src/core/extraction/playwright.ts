@@ -41,11 +41,6 @@ export { buildExtraHeaders } from "./shared.js";
 const generateUserAgent = () =>
   new UserAgent({ deviceCategory: "desktop" }).toString();
 
-const markdownParser = new H2MParser({
-  extract: { readability: false },
-  markdown: { linkStyle: "inline" },
-});
-
 export const buildContextOptions = (job: ScrapeJob): BrowserContextOptions => {
   const env = getEnv();
   const viewport = job.viewport ?? {
@@ -444,7 +439,11 @@ export const runPlaywrightScrape = async (
     let markdownBody: string | undefined;
     if (includeMarkdown) {
       try {
-        const markdownResult = await markdownParser.process(
+        const parser = new H2MParser({
+          extract: { readability: job.readability ?? true },
+          markdown: { linkStyle: "inline" },
+        });
+        const markdownResult = await parser.process(
           payloadBody,
           job.targetUrl,
         );

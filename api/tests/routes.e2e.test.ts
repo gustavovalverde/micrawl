@@ -5,7 +5,7 @@ import type {
   ScrapeStreamMessage,
   ScrapeSuccess,
   ScrapeSummary,
-} from "../src/types/scrape.js";
+} from "@micrawl/core/types";
 
 const runE2E = process.env.RUN_E2E === "true";
 const e2eDescribe = runE2E ? describe : describe.skip;

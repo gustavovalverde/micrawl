@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ScrapeJob, ScrapeFailure, ScrapeSuccess } from "../src/types/scrape.js";
+import type { ScrapeJob, ScrapeFailure, ScrapeSuccess } from "@micrawl/core/types";
 
 const originalEnv = { ...process.env };
 

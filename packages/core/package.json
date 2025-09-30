@@ -1,0 +1,62 @@
+{
+  "name": "@micrawl/core",
+  "version": "0.1.0",
+  "description": "Core scraping engine for Micrawl - supports Playwright and HTTP drivers with multi-format output",
+  "keywords": [
+    "web-scraping",
+    "playwright",
+    "scraper",
+    "crawler",
+    "html",
+    "markdown",
+    "serverless"
+  ],
+  "homepage": "https://github.com/gustavovalverde/micro-play#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gustavovalverde/micro-play.git",
+    "directory": "packages/core"
+  },
+  "license": "MIT",
+  "author": "Gustavo Valverde",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./types": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/types/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts src/types/index.ts --clean --format esm --target node18 --dts --out-dir dist",
+    "prepublishOnly": "pnpm run build",
+    "test": "vitest run --config ./vitest.config.ts"
+  },
+  "dependencies": {
+    "@sparticuz/chromium": "^138.0.2",
+    "h2m-parser": "^0.4.0",
+    "playwright-core": "^1.55.1",
+    "user-agents": "^1.1.664",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "24.6.0",
+    "tsup": "^8.2.4",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

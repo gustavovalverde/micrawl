@@ -1,4 +1,4 @@
-import type { ScrapeJob } from "../../src/types/scrape.js";
+import type { ScrapeJob } from "@micrawl/core/types";
 
 export const SIMPLE_HTML = `<!doctype html><html><head><title>Example</title><meta name="description" content="Demo page"><link rel="canonical" href="/home" /></head><body><h1>Hello</h1><a href="/about">About</a></body></html>`;
 export const TEXT_ONLY_HTML = `<!doctype html><html><body><h1>Hello</h1><p>World</p></body></html>`;

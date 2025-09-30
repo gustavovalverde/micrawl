@@ -7,7 +7,7 @@ import type {
   ScrapeStreamMessage,
   ScrapeSuccess,
   ScrapeSummary,
-} from "../src/types/scrape.js";
+} from "@micrawl/core/types";
 
 // Mock the scraper module with functions directly in the factory
 vi.mock("../src/scraper.js", async () => {

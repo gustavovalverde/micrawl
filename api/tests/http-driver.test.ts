@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ScrapeJob } from "../src/types/scrape.js";
+import type { ScrapeJob } from "@micrawl/core/types";
 import {
   BASIC_HTML,
   SIMPLE_HTML,
