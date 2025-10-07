@@ -1,16 +1,15 @@
 # @micrawl/core
 
-Core scraping engine for Micrawl - a serverless-friendly web scraper with Playwright and HTTP driver support.
+Extraction runtime that powers every Micrawl surface. It wraps Playwright and HTTP drivers, normalizes output, and streams progress for any host application—CLI tools, HTTP services, or agent plugins.
 
 ## Features
 
-- **Dual Driver Support**: Playwright (full browser) and HTTP (lightweight) drivers
-- **Auto Mode**: Automatically selects the best driver based on requirements
-- **Multi-Format Output**: HTML, Markdown (via h2m-parser)
-- **Progress Tracking**: Phase-based progress events (queued → navigating → capturing)
-- **Rich Metadata**: Extract titles, descriptions, canonical URLs, same-origin links
-- **Serverless-Optimized**: Chromium via `@sparticuz/chromium`, resource blocking
-- **Flexible Configuration**: Per-request locale, viewport, headers, proxy, basic auth
+- **Pluggable Drivers** – Ship dynamic Playwright sessions and fast HTTP fetches with one interface.
+- **Smart Routing** – Auto-selects the best driver per job but allows explicit overrides when you need control.
+- **Multi-Format Output** – Emit HTML, Markdown (h2m-parser), and structured metadata for indexing.
+- **Observable Progress** – Emit deterministic phase updates (`queued → navigating → capturing → completed`).
+- **Serverless Friendly** – Integrates with `@sparticuz/chromium` shims and resource blockers for cost-effective runs.
+- **Typed Config** – Zod-backed environment defaults, job schemas, and TypeScript types shared across packages.
 
 ## Installation
 
@@ -23,6 +22,8 @@ yarn add @micrawl/core
 ```
 
 ## Usage
+
+Drop the engine into any Node.js context—API routes, background queues, MCP tools, or scripts:
 
 ```typescript
 import { runScrapeJob } from "@micrawl/core";
@@ -51,6 +52,12 @@ if (result.status === "success") {
   console.error(result.errors);
 }
 ```
+
+## Integrations
+
+- **@micrawl/api** – Streams scrape jobs over HTTP using this engine under the hood.
+- **@micrawl/mcp-server** – Exposes Micrawl tools to AI agents via MCP, powered by the same drivers and progress emitters.
+- **Custom pipelines** – Use `runScrapeJob` inside workers, CLIs, or serverless functions to build bespoke ingestion flows.
 
 ## API
 

@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  micrawl-mcp:
+    build:
+      context: ..
+      dockerfile: mcp-server/Dockerfile
+    container_name: micrawl-mcp
+    stdin_open: true  # Required for stdio transport
+    tty: true         # Required for stdio transport
+    environment:
+      # Scraper configuration
+      - SCRAPER_DEFAULT_TIMEOUT_MS=60000
+      - SCRAPER_TEXT_ONLY_DEFAULT=false
+      - SCRAPER_DEFAULT_DRIVER=auto
+      - SCRAPER_MAX_URLS_PER_REQUEST=5
+
+      # Browser configuration
+      - SCRAPER_DEFAULT_LOCALE=en-US
+      - SCRAPER_DEFAULT_TIMEZONE=America/New_York
+      - SCRAPER_DEFAULT_VIEWPORT_WIDTH=1920
+      - SCRAPER_DEFAULT_VIEWPORT_HEIGHT=1080
+
+      # MCP server configuration
+      - MICRAWL_DOCS_DIR=/app/data/docs
+      - MICRAWL_LLMS_DIR=/app/data/llms
+      - MICRAWL_RESOURCE_MANIFEST=/app/data/.micrawl/registry.json
+      - MICRAWL_VERSION=0.1.0
+
+      # Node environment
+      - NODE_ENV=production
+    volumes:
+      # Persistent storage for saved documents and manifests
+      - ./data:/app/data
+    restart: unless-stopped
+
+    # Resource limits (adjust based on your needs)
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+
+# Usage:
+#
+# 1. Build and start the container:
+#    docker-compose -f mcp-server/docker-compose.yml up -d
+#
+# 2. Attach to stdio (for testing):
+#    docker attach micrawl-mcp
+#
+# 3. View logs:
+#    docker-compose -f mcp-server/docker-compose.yml logs -f
+#
+# 4. Stop:
+#    docker-compose -f mcp-server/docker-compose.yml down
+#
+# 5. Use with MCP client (example for Cursor):
+#    {
+#      "mcpServers": {
+#        "micrawl": {
+#          "type": "command",
+#          "command": "docker",
+#          "args": ["exec", "-i", "micrawl-mcp", "node", "dist/stdio.js"]
+#        }
+#      }
+#    }
+#
+# Note: For production MCP usage, consider using docker run directly
+# or configuring your MCP client to spawn the container with proper
+# stdin/stdout handling.

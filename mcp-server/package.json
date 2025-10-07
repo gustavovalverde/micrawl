@@ -1,0 +1,66 @@
+{
+  "name": "@micrawl/mcp-server",
+  "version": "0.1.0",
+  "description": "Model Context Protocol (MCP) server for web scraping with Micrawl - exposes scraping capabilities to AI assistants",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "web-scraping",
+    "ai-assistant",
+    "claude",
+    "cursor",
+    "scraper",
+    "llms-txt"
+  ],
+  "homepage": "https://github.com/gustavovalverde/micro-play/tree/main/mcp-server#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gustavovalverde/micro-play.git",
+    "directory": "mcp-server"
+  },
+  "license": "MIT",
+  "author": "Gustavo Valverde",
+  "type": "module",
+  "bin": {
+    "micrawl-mcp": "./dist/stdio.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/stdio.d.ts",
+      "import": "./dist/stdio.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "!dist/*.map",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup src/stdio.ts --clean --format esm --target node18 --dts --out-dir dist --external playwright-core,@sparticuz/chromium,chromium-bidi/lib/cjs/bidiMapper/BidiMapper,chromium-bidi/lib/cjs/cdp/CdpConnection",
+    "prepublishOnly": "pnpm run build",
+    "start": "pnpm run build && node dist/stdio.js",
+    "test": "vitest run --config ./vitest.config.ts",
+    "prepack": "pnpm run build"
+  },
+  "dependencies": {
+    "@micrawl/core": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.18.2",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "24.6.0",
+    "tsup": "^8.2.4",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "types": "./dist/stdio.d.ts"
+}

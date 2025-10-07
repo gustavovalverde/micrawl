@@ -1,243 +1,265 @@
-# Micrawl Scraper Service
+# Micrawl
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fgustavovalverde%2Fmicro-play&env=SCRAPER_DEFAULT_TIMEOUT_MS,SCRAPER_TEXT_ONLY_DEFAULT,SCRAPER_MAX_URLS_PER_REQUEST&envDescription=Configure%20the%20scraper%20service&envLink=https%3A%2F%2Fgithub.com%2Fyour-username%2Fmicro-play%23configuration&project-name=micrawl-scraper&repository-name=micrawl-scraper)
+**Modular web extraction tooling for APIs, AI agents, and data pipelines**
 
-A serverless-friendly scraper API that accepts a list of URLs, runs Playwright against each one, and streams the results back as newline-delimited JSON (NDJSON). The request stays synchronous, but you get per-URL feedback as soon as each scrape completes.
+Micrawl is a monorepo that lets you mix-and-match:
+
+- **API** - Serverless-ready scraping API with streaming NDJSON responses
+- **MCP Server** - Local documentation assistant for AI agents (Claude Code, Cursor, etc.)
+- **Core Library** - Shared scraping engine with Playwright and HTTP drivers
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fgustavovalverde%2Fmicro-play)
+
+---
 
 ## Table of Contents
 
-- [Micrawl Scraper Service](#micrawl-scraper-service)
-  - [Table of Contents](#table-of-contents)
-  - [Overview](#overview)
-  - [Getting Started](#getting-started)
-    - [Local development](#local-development)
-    - [Deploying to Vercel](#deploying-to-vercel)
-  - [Streaming Response Model](#streaming-response-model)
-    - [Request schema](#request-schema)
-    - [Response at a glance](#response-at-a-glance)
-    - [Why streaming instead of async?](#why-streaming-instead-of-async)
-    - [Reading the stream step-by-step](#reading-the-stream-step-by-step)
-  - [Client Recipes](#client-recipes)
-    - [Node.js / TypeScript](#nodejs--typescript)
-    - [Python](#python)
-  - [Development Workflow](#development-workflow)
-    - [Testing](#testing)
-    - [Manual smoke test](#manual-smoke-test)
+- [Quick Start](#quick-start)
+  - [Using the MCP Server (AI Agents)](#using-the-mcp-server-ai-agents)
+  - [Using the API (HTTP)](#using-the-api-http)
+- [What is Micrawl?](#what-is-micrawl)
+  - [Key Features](#key-features)
+- [Repository Structure](#repository-structure)
+- [API Documentation](#api-documentation)
+  - [Endpoint: POST `/scrape`](#endpoint-post-scrape)
+  - [Request Parameters](#request-parameters)
+  - [Response Format](#response-format)
+  - [Client Examples](#client-examples)
+- [MCP Server Documentation](#mcp-server-documentation)
+  - [Available Tools](#available-tools)
+  - [Installation](#installation)
+- [Core Library (`@micrawl/core`)](#core-library-micrawlcore)
+  - [Features](#features)
+  - [Usage](#usage)
 - [Configuration](#configuration)
-- [Roadmap \& Known Gaps](#roadmap--known-gaps)
-- [Project Layout](#project-layout)
-- [Code Map](#code-map)
+  - [Environment Variables](#environment-variables)
+- [Development](#development)
+  - [Setup](#setup)
+  - [Testing](#testing)
+  - [Project Scripts](#project-scripts)
+- [Deployment](#deployment)
+  - [Vercel (API)](#vercel-api)
+  - [MCP Server (Local)](#mcp-server-local)
+- [Architecture](#architecture)
+  - [Design Principles](#design-principles)
+  - [Package Structure](#package-structure)
+- [Roadmap](#roadmap)
+- [Security](#security)
+- [Contributing](#contributing)
+- [License](#license)
+- [Support](#support)
 
-## Overview
+---
 
-- **Streaming-first synchronous API** – immediate per-URL feedback without async queues.
-- **Playwright hardened for serverless** – Chromium via `@sparticuz/chromium`, resource blocking, per-request overrides (locale, viewport, user agent, proxy, headers, basic auth).
-- **Structured validation & logging** – Zod validates each request and every streamed record shares a `jobId` for log correlation.
-- **Progress counters baked in** – clients can render progress bars with no extra bookkeeping.
+## Quick Start
 
-Core modules live in `src/`:
-
-- `index.ts` – Hono app bootstrap & logging middleware
-- `routes.ts` – `/scrape` handler + NDJSON streaming
-- `scraper.ts` – Playwright orchestration
-- `env.ts` – typed environment configuration
-- `logger.ts` – structured logger
-
-## Getting Started
-
-### Local development
+### Using the MCP Server (AI Agents)
 
 ```bash
+# Build
 pnpm install
-vercel dev
-# open http://localhost:3000
-```
+pnpm build
 
-Smoke test the scraper locally:
-
-```bash
-curl -N \
-  -H 'content-type: application/json' \
-  -d '{"urls":["https://example.com"]}' \
-  http://localhost:3000/scrape
-```
-
-`-N` disables curl’s output buffering so you see each line as soon as it arrives.
-
-### Deploying to Vercel
-
-```bash
-pnpm install
-vercel build
-vercel deploy
-```
-
-## Streaming Response Model
-
-### Request schema
-
-```jsonc
+# Configure Claude Code / Cursor
+# Add to .claude/mcp.json or .cursor/mcp.json:
 {
-  "urls": ["https://example.com", "https://example.org"],
-  "captureTextOnly": true,
-  "waitForSelector": ".main",
-  "timeoutMs": 45000,
-  "basicAuth": { "username": "alice", "password": "s3cret" },
-  "locale": "en-GB",
-  "timezoneId": "Europe/London",
-  "viewport": { "width": 1366, "height": 768 },
-  "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_5_1)…",
-  "proxyUrl": "http://proxy:8080",
-  "headers": { "x-tenant": "acme" },
-  "driver": "auto",
-  "outputFormats": ["html", "markdown"]
+  "mcpServers": {
+    "web-docs-saver": {
+      "command": "node",
+      "args": ["<path>/mcp-server/dist/stdio.js"]
+    }
+  }
 }
 ```
 
-Micrawl normalizes every URL you send before the scrape starts. Trailing hashes
-are stripped, repeated slashes collapse to a single `/`, query parameters are
-sorted for stable caching, and duplicate targets are rejected with a validation
-error. Only `http://` and `https://` origins are accepted; everything else (for
-example `ftp://` or `file://`) is rejected up front so you can fix the payload
-without guessing.
+**Then ask your AI:**
+> "Save the Hono documentation from <https://hono.dev/docs> to ./docs"
 
-Specify the formats you need in `outputFormats`. Today Micrawl supports `html`
-and `markdown`; defaults remain HTML-only. If you ask for Markdown, the scraper
-automatically disables `captureTextOnly` so the DOM is available for a proper
-conversion.
+See [MCP Server README](mcp-server/README.md) for full documentation.
 
-Set `driver` to `playwright`, `http`, or `auto` (default `playwright`). The HTTP driver skips browser launch for lightweight pages, while `auto` chooses HTTP when the payload is text-only with no DOM requirements and otherwise falls back to Playwright.
-
-### Response at a glance
-
-Micrawl streams a sequence of newline-delimited JSON records for every batch:
-
-1. One or more `status: "progress"` records announce the current phase of the
-   scrape (`queued`, `navigating`, `capturing`).
-2. A terminal record for the URL (`success`, `fail`, or `error`).
-3. A final summary record (`status: "success"`) once the batch concludes.
-
-All records include:
-
-- `jobId`: UUID shared by the entire batch.
-- `index` / `total`: position within the batch (summary uses `total + 1`).
-- `progress`: counters `{ completed, remaining, succeeded, failed }` computed at
-  the time the record was emitted so dashboards can update without manual math.
-- `phase`: current scrape phase; `progress` lines report `queued`, `navigating`,
-  or `capturing`, while terminal records and the summary use `completed`.
-- `driver`: the effective driver that ran the job (`playwright` or `http`).
-- `targetUrl`: the normalized URL being processed (omitted on the summary).
-
-Payload blocks vary by status:
-
-- `data.page` on `status: "success"` now includes a `metadata` object with
-  `description`, `keywords`, `author`, `canonicalUrl`, and a `sameOriginLinks`
-  array for quick link graph traversal. The `contents` array lists every
-  requested format as `{ format, contentType, body, bytes }`, so clients can
-  iterate over the formats they asked for (HTML, Markdown, etc.).
-- `errors` on `status: "fail"` (scraper caught the issue and returned details).
-- `message` on `status: "error"` (unexpected exception in the pipeline).
-- `summary` on the final line summarising successes, failures, and error list.
-
-```jsonc
-{"status":"progress","phase":"queued","jobId":"2f1c...","index":1,"total":1,"targetUrl":"https://example.com/","progress":{"completed":0,"remaining":1,"succeeded":0,"failed":0}}
-{"status":"progress","phase":"navigating","jobId":"2f1c...","index":1,"total":1,"targetUrl":"https://example.com/","progress":{"completed":0,"remaining":1,"succeeded":0,"failed":0}}
-{"status":"progress","phase":"capturing","jobId":"2f1c...","index":1,"total":1,"targetUrl":"https://example.com/","progress":{"completed":0,"remaining":1,"succeeded":0,"failed":0}}
-{"status":"success","phase":"completed","jobId":"2f1c...","index":1,"total":1,"targetUrl":"https://example.com/","driver":"playwright","progress":{"completed":1,"remaining":0,"succeeded":1,"failed":0},"data":{"page":{"url":"https://example.com/","title":"Example Domain","httpStatusCode":200,"startedAt":"2025-09-26T17:30:41.128Z","finishedAt":"2025-09-26T17:30:42.042Z","durationMs":914,"loadStrategy":"load-event","contents":[{"format":"html","contentType":"text/html","body":"<html>...","bytes":1280}],"metadata":{"description":"Example Domain","keywords":["example"],"author":"Example Team","canonicalUrl":"https://example.com/","sameOriginLinks":["https://example.com/about/"]}}}}
-{"status":"success","phase":"completed","jobId":"2f1c...","index":2,"total":1,"progress":{"completed":1,"remaining":0,"succeeded":1,"failed":0},"summary":{"succeeded":1,"failed":0,"drivers":{"playwright":1},"failures":[]}}
-```
-
-If you request Markdown in addition to HTML you’ll see a second entry inside
-`data.page.contents` with `format: "markdown"` (body contains the Markdown
-string, `contentType` is `text/markdown`).
-
-### Why streaming instead of async?
-
-Traditional scraper APIs either block until every URL finishes or force you into submit/poll workflows. Streaming keeps the single HTTP request but emits each job result as soon as it’s ready, so you get:
-
-1. **Real-time visibility** – dashboards and logs can show progress immediately.
-2. **Lower peak memory** – you can process pages incrementally instead of buffering an entire batch.
-
-If you prefer the old-school “single JSON response,” just buffer the lines until you consume the summary, then parse the combined output.
-
-### Keeping payloads LLM-friendly
-
-Token counts matter when the output is headed straight into an LLM. A few tips to
-minimise the size Micrawl streams back:
-
-- Request only the formats you need. `outputFormats: ["markdown"]` emits a
-  single Markdown entry (via h2m-parser) and skips the HTML entirely. If you
-  ask for `"html"` and `"markdown"`, both show up in `contents`.
-- For the absolute smallest payload, set `captureTextOnly: true` and leave
-  `outputFormats` at its default. You’ll receive plain text extracted from the
-  page (`contents[0].body`) with no tags. (Markdown requires the DOM, so it’s
-  mutually exclusive with `captureTextOnly: true`).
-- Strip anything you don’t plan to consume—headers, proxies, and other optional
-  knobs should stay unset unless needed so your requests stay small and fast.
-
-### Reading the stream step-by-step
+### Using the API (HTTP)
 
 ```bash
-curl -N \
-  -H 'content-type: application/json' \
-  -d '{"urls":["https://example.com","https://example.org"]}' \
-  http://localhost:3000/scrape
+# Local development
+cd api
+pnpm install
+vercel dev
+
+# Deploy to Vercel
+vercel deploy
 ```
 
-- `curl -N` disables stdout buffering so you visibly see the stream.
-- Each line is valid JSON terminated by `\n`. Process them as they arrive for real-time behaviour, or buffer them for the traditional experience.
-- Expect a few `status: "progress"` heartbeats before each result. Use the
-  `phase` field (`queued` → `navigating` → `capturing`) to drive UI state or
-  logs.
-- The final line (with `summary`) is the definitive “batch complete” signal.
-- If the connection closes before the summary arrives, assume the batch ended early and inspect logs (every line shares the same `jobId`).
+**Test the API:**
 
-## Client Recipes
+```bash
+curl -N http://localhost:3000/scrape \
+  -H 'content-type: application/json' \
+  -d '{"urls":["https://example.com"]}'
+```
 
-### Node.js / TypeScript
+---
 
-```ts
+## What is Micrawl?
+
+Micrawl is a cohesive toolkit for capturing, transforming, and streaming structured web content. The ecosystem is designed so you can:
+
+- **Embed the core** in any Node.js service to run high-fidelity scraping jobs with Playwright or lightweight HTTP drivers.
+- **Expose the API** to provide serverless endpoints that stream progress and results in NDJSON to any consumer.
+- **Extend AI clients** via the MCP server so agents like Claude Code or Cursor can fetch and persist knowledge on demand.
+
+Use the packages together for an end-to-end documentation pipeline, or independently for focused scraping, ingestion, or agent use cases.
+
+### Key Features
+
+✅ **Composable Packages** – Use the Core, API, or MCP server independently or in combination.
+✅ **Clean Extraction** – Mozilla Readability removes navigation, ads, and chrome noise.
+✅ **Multi-Format Outputs** – HTML, Markdown, and raw metadata for downstream indexing.
+✅ **Adaptive Drivers** – Playwright for full-browser rendering, HTTP for fast static fetches, with auto-selection logic.
+✅ **Streaming Interfaces** – Real-time NDJSON progress from the API and MCP notifications for agents.
+✅ **Serverless & Local Friendly** – Tuned for Vercel/Lambda deployments while remaining easy to run on a laptop or inside Docker.
+✅ **Type-Safe by Default** – Shared Zod schemas and TypeScript types across packages for confidence and reuse.
+
+---
+
+## Repository Structure
+
+```
+micro-play/
+├── api/                    # Vercel serverless API
+│   ├── src/
+│   │   ├── index.ts       # Hono app
+│   │   ├── routes.ts      # /scrape endpoint
+│   │   └── scraper.ts     # Re-exports from @micrawl/core
+│   └── tests/
+├── mcp-server/             # Model Context Protocol server
+│   ├── src/
+│   │   ├── server.ts      # 2 MCP tools (fetch_page, save_docs)
+│   │   ├── scraper.ts     # Wrapper around @micrawl/core
+│   │   ├── files.ts       # File utilities
+│   │   └── stdio.ts       # CLI entrypoint
+│   └── tests/
+├── packages/
+│   └── core/               # Shared scraping engine
+│       └── src/
+│           ├── core/
+│           │   └── extraction/
+│           │       ├── playwright.ts
+│           │       ├── http.ts
+│           │       └── dispatcher.ts
+│           └── types/
+└── package.json            # Workspace root
+```
+
+---
+
+## API Documentation
+
+### Endpoint: POST `/scrape`
+
+**Request:**
+
+```json
+{
+  "urls": ["https://example.com"],
+  "outputFormats": ["markdown"],
+  "readability": true,
+  "driver": "auto",
+  "crawl": false
+}
+```
+
+**Response (NDJSON stream):**
+
+```json
+{"status":"progress","phase":"queued","jobId":"...","targetUrl":"https://example.com"}
+{"status":"progress","phase":"navigating","jobId":"...","targetUrl":"https://example.com"}
+{"status":"progress","phase":"capturing","jobId":"...","targetUrl":"https://example.com"}
+{"status":"success","phase":"completed","jobId":"...","data":{"page":{"url":"...","title":"...","contents":[{"format":"markdown","body":"..."}]}}}
+{"status":"success","phase":"completed","jobId":"...","summary":{"succeeded":1,"failed":0}}
+```
+
+### Request Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `urls` | `string[]` | *required* | URLs to scrape (max 5) |
+| `outputFormats` | `string[]` | `["html"]` | Output formats: `"html"`, `"markdown"` |
+| `readability` | `boolean` | `true` | Use Mozilla Readability for clean content |
+| `driver` | `string` | `"playwright"` | Driver: `"playwright"`, `"http"`, `"auto"` |
+| `captureTextOnly` | `boolean` | `false` | Extract plain text only (faster) |
+| `timeoutMs` | `number` | `45000` | Page load timeout (1000-120000) |
+| `waitForSelector` | `string` | - | CSS selector to wait for |
+| `basicAuth` | `object` | - | `{ username, password }` |
+| `locale` | `string` | `"en-US"` | Browser locale |
+| `viewport` | `object` | `{1920, 1080}` | `{ width, height }` |
+
+### Response Format
+
+Each line is a JSON object with:
+
+- `status`: `"progress"`, `"success"`, `"fail"`, or `"error"`
+- `phase`: Current phase (`"queued"`, `"navigating"`, `"capturing"`, `"completed"`)
+- `jobId`: UUID for the entire batch
+- `index`/`total`: Position in batch
+- `progress`: `{ completed, remaining, succeeded, failed }`
+- `driver`: Driver used (`"playwright"` or `"http"`)
+
+**Success response includes:**
+
+```json
+{
+  "data": {
+    "page": {
+      "url": "https://example.com",
+      "title": "Example Domain",
+      "httpStatusCode": 200,
+      "durationMs": 914,
+      "contents": [
+        {
+          "format": "markdown",
+          "contentType": "text/markdown",
+          "body": "# Example Domain\n\n...",
+          "bytes": 1280
+        }
+      ],
+      "metadata": {
+        "sameOriginLinks": ["https://example.com/about"]
+      }
+    }
+  }
+}
+```
+
+### Client Examples
+
+**Node.js:**
+
+```typescript
 import { createInterface } from "node:readline";
 
 const res = await fetch("http://localhost:3000/scrape", {
   method: "POST",
   headers: { "content-type": "application/json" },
-  body: JSON.stringify({ urls: ["https://example.com", "https://example.org"] }),
+  body: JSON.stringify({
+    urls: ["https://example.com"],
+    outputFormats: ["markdown"]
+  }),
 });
 
-if (!res.body) throw new Error("missing response body");
-
-const rl = createInterface({ input: res.body as unknown as NodeJS.ReadableStream });
+const rl = createInterface({
+  input: res.body as unknown as NodeJS.ReadableStream
+});
 
 for await (const line of rl) {
-  if (!line) continue;
   const record = JSON.parse(line);
 
-  if (record.status === "progress") {
-    console.log(
-      `[${record.index}/${record.total}] → ${record.phase}`,
-      record.targetUrl,
-      record.progress,
-    );
-    continue;
-  }
-
   if (record.status === "success" && record.data?.page) {
-    for (const content of record.data.page.contents ?? []) {
-      console.log(
-        `[${record.index}/${record.total}] ✅ ${record.targetUrl} (${content.format})`,
-        `${content.bytes} bytes`,
-      );
-    }
-  } else if (record.status === "fail") {
-    console.warn(`[${record.index}/${record.total}] ❌`, record.targetUrl, record.errors);
-  } else {
-    console.log("Batch summary", record.summary);
+    console.log(record.data.page.contents[0].body);
   }
 }
 ```
 
-### Python
+**Python:**
 
 ```python
 import json
@@ -245,7 +267,7 @@ import requests
 
 resp = requests.post(
     "http://localhost:3000/scrape",
-    json={"urls": ["https://example.com", "https://example.org"]},
+    json={"urls": ["https://example.com"], "outputFormats": ["markdown"]},
     stream=True,
 )
 
@@ -254,103 +276,307 @@ for raw in resp.iter_lines():
         continue
     record = json.loads(raw.decode("utf-8"))
 
-    if record["status"] == "progress":
-        print(
-            f"{record['index']}/{record['total']} → {record['phase']}",
-            record.get("targetUrl"),
-            record["progress"],
-        )
-        continue
-
     if record["status"] == "success" and "data" in record:
-        for content in record["data"]["page"].get("contents", []):
-            print(
-                f"{record['index']}/{record['total']} ✅ {record.get('targetUrl')} ({content['format']})",
-                f"{content['bytes']} bytes",
-            )
-    elif record["status"] == "fail":
-        print(f"{record['index']}/{record['total']} ❌ {record.get('targetUrl')}: {record['errors']}")
-    else:
-        print("Summary:", record.get("summary"))
+        print(record["data"]["page"]["contents"][0]["body"])
 ```
 
-Any framework that exposes a streaming response (Axios with `responseType: 'stream'`, Go’s `http.Client`, Rust’s `reqwest`, browser `ReadableStream`) can adopt the same loop: read each line, parse JSON, act on `status`, watch for the summary.
+---
 
-## Development Workflow
+## MCP Server Documentation
 
-### Testing
+The MCP server provides a local documentation assistant for AI agents.
 
-- `pnpm test` – unit + integration suites (Vitest, `hono/testing`). Real Playwright E2E tests are skipped unless you opt in.
-- `pnpm test:types` – TypeScript surface check (`tsc --noEmit`).
-- `pnpm test:e2e` – opt-in browser-based E2E smoke tests (sets `RUN_E2E=true` and runs only `tests/routes.e2e.test.ts`).
-  - Run `npx playwright install chromium` once on your machine before executing this command so Playwright’s default Chromium binary is available (we only ship the Sparticuz build for Linux deployments).
+### Available Tools
 
-### Manual smoke test
+#### `fetch_page`
 
-```bash
-vercel dev
-curl -N \
-  -H 'content-type: application/json' \
-  -d '{"urls":["https://example.com"]}' \
-  http://localhost:3000/scrape
+Fetch clean documentation from a URL and return as markdown.
+
+**Example:**
+> "Get the content from <https://hono.dev/docs/getting-started>"
+
+#### `save_docs`
+
+Save documentation to your local filesystem. Supports:
+
+- Single page
+- Multiple pages (array of URLs)
+- Entire site (with `crawl: true`)
+
+**Examples:**
+> "Save <https://hono.dev/docs> to ./docs"
+> "Save <https://hono.dev/docs> to ./docs and crawl all pages"
+
+### Installation
+
+See [MCP Server README](mcp-server/README.md) for:
+
+- Detailed installation instructions
+- Configuration for Claude Code, Cursor, and other MCP clients
+- Environment variables
+- Usage examples
+- Troubleshooting
+
+---
+
+## Core Library (`@micrawl/core`)
+
+Shared scraping engine used by both API and MCP server.
+
+### Features
+
+- **Playwright Driver** - Full browser rendering for complex pages
+- **HTTP Driver** - Fast, lightweight fetching for simple pages
+- **Auto Driver** - Intelligent selection based on requirements
+- **Mozilla Readability** - Clean article extraction
+- **Multi-Format Output** - HTML, Markdown, or plain text
+- **Type-Safe** - Full TypeScript support
+
+### Usage
+
+```typescript
+import { runScrapeJob } from "@micrawl/core";
+import type { ScrapeJob } from "@micrawl/core/types";
+
+const job: ScrapeJob = {
+  targetUrl: "https://example.com",
+  outputFormats: ["markdown"],
+  captureTextOnly: false,
+  driver: "playwright",
+  timeoutMs: 60000,
+  readability: true
+};
+
+const result = await runScrapeJob(
+  job,
+  "job-123",
+  { index: 1, total: 1, targetUrl: job.targetUrl },
+  async (phase) => console.log(phase)
+);
+
+if (result.status === "success") {
+  console.log(result.data.page.contents[0].body);
+}
 ```
 
-`Ctrl+C` cleanly stops the dev server: the SIGINT handler closes the shared
-Chromium instance before the process exits, so you won’t end up with orphaned
-browser processes between runs.
+---
 
 ## Configuration
 
-All environment variables are documented and validated in `src/config/env.ts`:
+### Environment Variables
 
-- `SCRAPER_DEFAULT_TIMEOUT_MS` (default `45000`)
-- `SCRAPER_TEXT_ONLY_DEFAULT` (default `true`)
-- `SCRAPER_MAX_URLS_PER_REQUEST` (default `5`)
-- `SCRAPER_DEFAULT_LOCALE` (default `en-US`)
-- `SCRAPER_DEFAULT_TIMEZONE` (default `America/New_York`)
-- `SCRAPER_DEFAULT_VIEWPORT_WIDTH` (default `1920`)
-- `SCRAPER_DEFAULT_VIEWPORT_HEIGHT` (default `1080`)
-- `SCRAPER_DEFAULT_USER_AGENT` (optional explicit UA; otherwise `user-agents` generates one)
-- `SCRAPER_DEFAULT_DRIVER` (default `playwright`; choose `http`, `playwright`, or `auto` when a request omits the `driver` field)
-- `SCRAPER_HEALTHCHECK_URL` (default `https://example.com/`; used by `/health` to verify outbound navigation)
-- `CHROMIUM_BINARY` (optional path override for the Chromium executable)
+#### Core Scraper
 
-## Roadmap & Known Gaps
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SCRAPER_DEFAULT_TIMEOUT_MS` | `45000` | Default timeout for page loads |
+| `SCRAPER_TEXT_ONLY_DEFAULT` | `true` | Extract plain text by default |
+| `SCRAPER_MAX_URLS_PER_REQUEST` | `5` | Max URLs per batch |
+| `SCRAPER_DEFAULT_LOCALE` | `en-US` | Browser locale |
+| `SCRAPER_DEFAULT_TIMEZONE` | `America/New_York` | Browser timezone |
+| `SCRAPER_DEFAULT_VIEWPORT_WIDTH` | `1920` | Viewport width |
+| `SCRAPER_DEFAULT_VIEWPORT_HEIGHT` | `1080` | Viewport height |
+| `SCRAPER_DEFAULT_DRIVER` | `playwright` | Default driver |
+| `CHROMIUM_BINARY` | *(auto)* | Custom Chromium path |
 
-- Rate limiting / API keys – planned middleware to keep shared deployments safe.
-- Request-level timeout guard – add an abort controller so slow batches don’t run indefinitely even if individual `timeoutMs` values are high.
-- `/health` navigation smoke – health check currently launches Chromium but doesn’t visit a URL; upcoming change will fetch a lightweight page.
-- Payload size ceiling – large HTML bodies presently stream in full; future work will cap and annotate oversized responses.
-- Metrics export – logs are structured, but there is no OTEL/StatsD emitter yet.
+#### API Specific
 
-## Project Layout
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SCRAPER_HEALTHCHECK_URL` | `https://example.com/` | Health check URL |
 
-```text
-src/
-  index.ts      # Hono app setup + logging middleware
-  env.ts        # Zod env schema
-  logger.ts     # Structured console logger
-  routes.ts     # HTTP contracts + NDJSON streaming
-  scraper.ts    # Direct Playwright integration
-  types/        # Shared scraper domain types
-api/index.ts    # Vercel entrypoint exporting Hono app
+#### MCP Server Specific
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MICRAWL_DOCS_DIR` | `./docs` | Directory for saved docs |
+
+---
+
+## Development
+
+### Setup
+
+```bash
+# Install dependencies
+pnpm install
+
+# Build all packages
+pnpm build
+
+# Run tests
+pnpm test
+
+# Lint and format
+pnpm lint
+pnpm format
 ```
 
-## Code Map
+### Testing
 
-- `createApp()` (`src/index.ts`) wires the logging middleware, routes, and the
-  shared-browser shutdown hook. Runtime signals are routed through
-  `closeSharedBrowser()` so local runs don’t leak Chromium.
-- `registerRoutes()` (`src/routes.ts`) validates payloads with the schema in
-  `scrapeRequestSchema` and streams each result from `runScrapeJob()`. The
-  streamed summary is computed in the same loop so clients never wait for
-  post-processing.
-- `runScrapeJob()` (`src/scraper.ts`) owns all Playwright orchestration. It
-  consults the helpers in `src/scraper-filters.ts` before navigation, reuses the
-  cached browser from `getBrowser()`, and surfaces failures through the typed
-  envelopes in `src/types/scrape.ts`.
-- `tests/routes.*.test.ts` mock only the scraper entry points—if a new helper is
-  exported from `src/scraper.ts` (e.g. the shutdown helper), remember to add it
-  to the mocks so integration tests continue to isolate route logic.
+```bash
+# Run all tests
+pnpm test
 
-Questions? Open an issue or reach out to the maintainer.
+# API tests only
+pnpm --filter @micrawl/api test
+
+# MCP server tests only
+pnpm --filter @micrawl/mcp-server test
+
+# Core library tests only
+pnpm --filter @micrawl/core test
+```
+
+### Project Scripts
+
+- `pnpm build` - Build all packages
+- `pnpm test` - Run all tests
+- `pnpm lint` - Lint all code
+- `pnpm format` - Format all code
+
+---
+
+## Deployment
+
+### Vercel (API)
+
+```bash
+cd api
+vercel deploy
+```
+
+**Environment variables to set:**
+
+- `SCRAPER_DEFAULT_TIMEOUT_MS`
+- `SCRAPER_TEXT_ONLY_DEFAULT`
+- `SCRAPER_DEFAULT_DRIVER`
+
+### MCP Server (Local)
+
+The MCP server is designed to run locally on developer machines:
+
+1. Build: `pnpm build`
+2. Configure in your AI client (Claude Code, Cursor)
+3. Restart the AI client
+
+---
+
+## Architecture
+
+### Design Principles
+
+Micrawl follows **cognitive load minimization** principles:
+
+- **Deep modules** - Simple interfaces, complex implementation hidden
+- **Single source of truth** - Core library shared by all packages
+- **No shallow abstractions** - Direct, clear code paths
+- **Self-describing** - Tools and parameters use natural language
+
+See [cognitive-load.md](cognitive-load.md) for detailed design philosophy.
+
+### Package Structure
+
+**Monorepo Layout:**
+
+- `api/` - Serverless API application
+- `mcp-server/` - MCP server application
+- `packages/core/` - Shared library
+- Root workspace manages all packages
+
+**Separation of Concerns:**
+
+- API handles HTTP/streaming concerns
+- MCP server handles stdio/local concerns
+- Core library handles scraping logic
+
+**No Code Duplication:**
+
+- Both API and MCP use `@micrawl/core`
+- Consistent behavior across transports
+- Single test suite for scraping logic
+
+---
+
+## Roadmap
+
+### Phase 1: Local Intelligence (Current)
+
+- ✅ Clean documentation extraction
+- ✅ Multi-format output (HTML, Markdown)
+- ✅ Smart driver selection
+- ✅ Streaming API
+- ✅ MCP server for AI agents
+
+### Phase 2: Enhanced MCP (Planned)
+
+- 🔄 Local documentation search (`search_docs` tool)
+- 🔄 Code example extraction
+- 🔄 Project dependency auto-saver
+- 🔄 Documentation URL discovery (via AI delegation)
+
+### Phase 3: Advanced Features (Future)
+
+- Semantic search with embeddings
+- Multi-source search (local + web)
+- Interactive tutorial generation
+- Documentation freshness detection
+
+See [mcp-server/docs/development-plan.md](mcp-server/docs/development-plan.md) for detailed roadmap.
+
+---
+
+## Security
+
+Security is a priority for Micrawl. Key security features:
+
+**MCP Server:**
+- stdio-only transport (no network exposure)
+- Path traversal protection
+- Input validation with Zod schemas
+- No command execution with user input
+
+**API:**
+- Request validation and rate limiting
+- Secure driver selection
+- Timeout controls
+- Error handling without information leakage
+
+For detailed security information:
+- [MCP Server Security Documentation](mcp-server/docs/security.md)
+- [GitHub Security Advisories](https://github.com/gustavovalverde/micro-play/security/advisories)
+
+**Reporting Vulnerabilities:**
+Please report security issues via [GitHub Security Advisories](https://github.com/gustavovalverde/micro-play/security/advisories), not public issues.
+
+---
+
+## Contributing
+
+Contributions are welcome! Please:
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Run tests: `pnpm test`
+5. Run linter: `pnpm lint`
+6. Submit a pull request
+
+**Security Contributions:**
+- Security issues should be reported privately via GitHub Security Advisories
+- Include proof of concept and impact assessment
+- Follow coordinated disclosure practices
+
+---
+
+## License
+
+MIT - See [LICENSE](LICENSE) for details
+
+---
+
+## Support
+
+- **Issues**: [GitHub Issues](https://github.com/gustavovalverde/micro-play/issues)
+- **Documentation**: [MCP Server Docs](mcp-server/README.md)
+- **Roadmap**: [Development Plan](mcp-server/docs/development-plan.md)
