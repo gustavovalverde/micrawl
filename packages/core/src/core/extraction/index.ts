@@ -1,15 +1,11 @@
-import type { ScrapeDriverPhaseEmitter, ScrapeDriverPosition, ScrapeDriverResult } from "../../types/scrape-driver.js";
 import type { ScrapeJob } from "../../types/scrape.js";
-import { httpDriver, runHttpScrape, verifyHttpDriver } from "./http.js";
-import {
-  playwrightDriver,
-  runPlaywrightScrape,
-  verifyChromiumLaunch,
-  closeSharedBrowser,
-  buildContextOptions,
-  buildExtraHeaders,
-} from "./playwright.js";
+import type {
+  ScrapeDriverPhaseEmitter,
+  ScrapeDriverPosition,
+  ScrapeDriverResult,
+} from "../../types/scrape-driver.js";
 import { resolveDriver, resolveDriverName } from "./dispatcher.js";
+import { httpDriver, runHttpScrape, verifyHttpDriver } from "./http.js";
 
 export const runScrapeJob = async (
   job: ScrapeJob,
@@ -25,11 +21,11 @@ export const runScrapeJob = async (
 
 export { resolveDriver, resolveDriverName } from "./dispatcher.js";
 export {
+  buildContextOptions,
+  buildExtraHeaders,
+  closeSharedBrowser,
   playwrightDriver,
   runPlaywrightScrape,
   verifyChromiumLaunch,
-  closeSharedBrowser,
-  buildContextOptions,
-  buildExtraHeaders,
 } from "./playwright.js";
 export { httpDriver, runHttpScrape, verifyHttpDriver };

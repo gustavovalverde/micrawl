@@ -58,7 +58,9 @@ const envSchema = z
       .max(4096)
       .catch(1080),
     SCRAPER_DEFAULT_USER_AGENT: z.string().trim().min(1).optional(),
-    SCRAPER_DEFAULT_DRIVER: z.enum(["playwright", "http", "auto"]).catch("playwright"),
+    SCRAPER_DEFAULT_DRIVER: z
+      .enum(["playwright", "http", "auto"])
+      .catch("playwright"),
     CHROMIUM_BINARY: z.string().url().optional(),
     SCRAPER_HEALTHCHECK_URL: z.string().url().catch("https://example.com/"),
   })
@@ -79,4 +81,3 @@ export const getEnv = (): RuntimeEnv => {
  * Cheap way to branch on behaviour without re-parsing the environment.
  */
 export const isProduction = () => getEnv().NODE_ENV === "production";
-

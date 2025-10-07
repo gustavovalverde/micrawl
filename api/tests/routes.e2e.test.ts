@@ -1,11 +1,11 @@
-import { testClient } from "hono/testing";
-import { beforeAll, describe, expect, it } from "vitest";
-import { createApp } from "../src/index.js";
 import type {
   ScrapeStreamMessage,
   ScrapeSuccess,
   ScrapeSummary,
 } from "@micrawl/core/types";
+import { testClient } from "hono/testing";
+import { beforeAll, describe, expect, it } from "vitest";
+import { createApp } from "../src/index.js";
 
 const runE2E = process.env.RUN_E2E === "true";
 const e2eDescribe = runE2E ? describe : describe.skip;
@@ -52,7 +52,7 @@ e2eDescribe("E2E: /scrape route with real browser", () => {
     );
     expect(result).toBeDefined();
     if (!result) return;
-    expect(result.targetUrl).toBe("https://example.com");
+    expect(result.targetUrl).toBe("https://example.com/");
     expect(result.data.page.httpStatusCode).toBeGreaterThanOrEqual(200);
     expect(result.data.page.contents[0]?.body ?? "").toContain(
       "Example Domain",
@@ -111,7 +111,7 @@ e2eDescribe("E2E: /scrape route with real browser", () => {
         line.status === "success" && "data" in line,
     );
     expect(successLines.length).toBeGreaterThanOrEqual(2);
-    expect(successLines[0].targetUrl).toBe("https://example.com");
+    expect(successLines[0].targetUrl).toBe("https://example.com/");
     expect(successLines[1].targetUrl).toBe("https://example.com/robots.txt");
 
     const batchSummary = lines.find(

@@ -1,7 +1,7 @@
-import { logger } from "../../logger.js";
 import { getEnv } from "../../config/index.js";
+import { logger } from "../../logger.js";
+import type { ScrapeDriverName, ScrapeJob } from "../../types/scrape.js";
 import type { ScrapeDriver } from "../../types/scrape-driver.js";
-import type { ScrapeJob, ScrapeDriverName } from "../../types/scrape.js";
 import { httpDriver } from "./http.js";
 import { playwrightDriver } from "./playwright.js";
 
@@ -10,7 +10,9 @@ const DRIVER_MAP: Record<Exclude<ScrapeDriverName, "auto">, ScrapeDriver> = {
   http: httpDriver,
 };
 
-const chooseAutoDriver = (job: ScrapeJob): Exclude<ScrapeDriverName, "auto"> => {
+const chooseAutoDriver = (
+  job: ScrapeJob,
+): Exclude<ScrapeDriverName, "auto"> => {
   if (job.waitForSelector) {
     return "playwright";
   }
@@ -28,7 +30,9 @@ const chooseAutoDriver = (job: ScrapeJob): Exclude<ScrapeDriverName, "auto"> => 
   return "playwright";
 };
 
-export const resolveDriverName = (job: ScrapeJob): Exclude<ScrapeDriverName, "auto"> => {
+export const resolveDriverName = (
+  job: ScrapeJob,
+): Exclude<ScrapeDriverName, "auto"> => {
   const requested = job.driver ?? getEnv().SCRAPER_DEFAULT_DRIVER;
   if (requested === "auto") {
     return chooseAutoDriver(job);

@@ -1,5 +1,9 @@
+import type {
+  ScrapeFailure,
+  ScrapeJob,
+  ScrapeSuccess,
+} from "@micrawl/core/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ScrapeJob, ScrapeFailure, ScrapeSuccess } from "@micrawl/core/types";
 
 const originalEnv = { ...process.env };
 
@@ -93,10 +97,14 @@ describe("buildExtraHeaders", () => {
   });
 });
 
-
 describe("playwrightDriver", () => {
   it("exposes the Playwright driver for reuse", async () => {
-    const { playwrightDriver, runPlaywrightScrape, verifyChromiumLaunch, closeSharedBrowser } = await withEnv();
+    const {
+      playwrightDriver,
+      runPlaywrightScrape,
+      verifyChromiumLaunch,
+      closeSharedBrowser,
+    } = await withEnv();
 
     expect(playwrightDriver.name).toBe("playwright");
     expect(playwrightDriver.run).toBe(runPlaywrightScrape);
@@ -130,9 +138,7 @@ describe("runScrapeJob", () => {
       },
     };
 
-    const spy = vi
-      .spyOn(httpDriver, "run")
-      .mockResolvedValue(success);
+    const spy = vi.spyOn(httpDriver, "run").mockResolvedValue(success);
 
     const job: ScrapeJob = {
       targetUrl: "https://example.com",
@@ -178,9 +184,7 @@ describe("runScrapeJob", () => {
       ],
     };
 
-    const spy = vi
-      .spyOn(playwrightDriver, "run")
-      .mockResolvedValue(failure);
+    const spy = vi.spyOn(playwrightDriver, "run").mockResolvedValue(failure);
 
     const job: ScrapeJob = {
       targetUrl: "https://example.com",
@@ -236,13 +240,14 @@ describe("resolveDriverName", () => {
   });
 });
 
-
 describe("resolveDriverName default", () => {
   it("uses SCRAPER_DEFAULT_DRIVER when driver hint is omitted", async () => {
     await withEnv();
     process.env.SCRAPER_DEFAULT_DRIVER = "http";
     vi.resetModules();
-    const { resolveDriverName: resolveWithHttp } = await import("../src/scraper.js");
+    const { resolveDriverName: resolveWithHttp } = await import(
+      "../src/scraper.js"
+    );
     expect(resolveWithHttp({ ...baseJob, driver: undefined })).toBe("http");
   });
 });

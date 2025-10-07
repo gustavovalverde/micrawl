@@ -5,5 +5,8 @@ export default defineConfig({
     globals: true,
     include: ["tests/**/*.test.ts"],
     environment: "node",
+    deps: {
+      inline: ["@micrawl/core", "playwright-core", "@sparticuz/chromium"],
+    },
   },
 });

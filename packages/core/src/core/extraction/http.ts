@@ -22,7 +22,7 @@ const DEFAULT_CONTENT_TYPE = "text/html";
 
 const notifyPhase = async (
   emitter: ScrapeDriverPhaseEmitter | undefined,
-  phase: Exclude<ScrapePhase, "completed">
+  phase: Exclude<ScrapePhase, "completed">,
 ) => {
   if (!emitter) return;
   try {
@@ -77,9 +77,9 @@ const extractMetadata = (html: string, baseUrl: URL): HtmlMetadata => {
 
   const sameOriginLinks = new Set<string>();
   const linkRegex = /<a[^>]+href=["']([^"'#]+)["'][^>]*>/gi;
-  let linkMatch: RegExpExecArray | null;
+  let linkMatch: RegExpExecArray | null = linkRegex.exec(html);
 
-  while ((linkMatch = linkRegex.exec(html))) {
+  while (linkMatch) {
     const href = linkMatch[1];
     try {
       const resolved = new URL(href, baseUrl);
@@ -87,13 +87,14 @@ const extractMetadata = (html: string, baseUrl: URL): HtmlMetadata => {
         resolved.hash = "";
         sameOriginLinks.add(resolved.toString());
       }
-    } catch {
-      continue;
-    }
+    } catch {}
+    linkMatch = linkRegex.exec(html);
   }
 
   return {
-    description: descriptionMatch ? decodeEntities(descriptionMatch[1].trim()) : undefined,
+    description: descriptionMatch
+      ? decodeEntities(descriptionMatch[1].trim())
+      : undefined,
     keywords: keywordsMatch
       ? keywordsMatch[1]
           .split(",")
@@ -136,9 +137,10 @@ const buildHttpSuccess = (
       durationMs,
       loadStrategy: "load-event",
       contents: (() => {
-        const formats = job.outputFormats && job.outputFormats.length > 0
-          ? job.outputFormats
-          : ["html"];
+        const formats =
+          job.outputFormats && job.outputFormats.length > 0
+            ? job.outputFormats
+            : ["html"];
 
         const entries = [];
 
@@ -291,12 +293,14 @@ export const runHttpScrape: ScrapeDriver["run"] = async (
 
     const buffer = Buffer.from(await response.arrayBuffer());
     const html = buffer.toString("utf8");
-    const contentType = response.headers.get("content-type") ?? DEFAULT_CONTENT_TYPE;
+    const contentType =
+      response.headers.get("content-type") ?? DEFAULT_CONTENT_TYPE;
 
     let markdown: string | undefined;
-    const formats = job.outputFormats && job.outputFormats.length > 0
-      ? job.outputFormats
-      : ["html"];
+    const formats =
+      job.outputFormats && job.outputFormats.length > 0
+        ? job.outputFormats
+        : ["html"];
 
     if (formats.includes("markdown")) {
       try {

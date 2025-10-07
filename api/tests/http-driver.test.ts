@@ -1,15 +1,17 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ScrapeJob } from "@micrawl/core/types";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  BASIC_HTML,
-  SIMPLE_HTML,
-  TEXT_ONLY_HTML,
   buildHtmlResponse,
   createHttpJob,
+  TEXT_ONLY_HTML,
 } from "./fixtures/http.js";
 
 const originalEnv = { ...process.env };
 const originalFetch = global.fetch;
+const mutableGlobal = globalThis as typeof globalThis & {
+  fetch?: typeof globalThis.fetch;
+  AbortController: typeof globalThis.AbortController;
+};
 
 const loadDriver = async () => {
   vi.resetModules();
@@ -23,9 +25,9 @@ beforeEach(() => {
 
 afterEach(() => {
   if (originalFetch) {
-    global.fetch = originalFetch;
+    mutableGlobal.fetch = originalFetch;
   } else {
-    delete (global as any).fetch;
+    delete mutableGlobal.fetch;
   }
   process.env = { ...originalEnv };
   vi.restoreAllMocks();
@@ -45,11 +47,16 @@ describe("httpDriver.run", () => {
     });
 
     const phaseSpy = vi.fn();
-    const result = await httpDriver.run(job, "job-1", {
-      index: 1,
-      total: 1,
-      targetUrl: job.targetUrl,
-    }, phaseSpy);
+    const result = await httpDriver.run(
+      job,
+      "job-1",
+      {
+        index: 1,
+        total: 1,
+        targetUrl: job.targetUrl,
+      },
+      phaseSpy,
+    );
 
     expect(result.status).toBe("success");
     if (result.status !== "success") {
@@ -58,12 +65,16 @@ describe("httpDriver.run", () => {
 
     const page = result.data.page;
     const htmlContent = page.contents.find((item) => item.format === "html");
-    const markdownContent = page.contents.find((item) => item.format === "markdown");
+    const markdownContent = page.contents.find(
+      (item) => item.format === "markdown",
+    );
 
     expect(htmlContent).toBeDefined();
     expect(markdownContent).toBeDefined();
     expect(page.metadata?.canonicalUrl).toBe("https://example.com/home");
-    expect(page.metadata?.sameOriginLinks).toContain("https://example.com/about");
+    expect(page.metadata?.sameOriginLinks).toContain(
+      "https://example.com/about",
+    );
 
     const phases = phaseSpy.mock.calls.map(([phase]) => phase);
     expect(phases).toEqual(["navigating", "capturing"]);
@@ -89,14 +100,19 @@ describe("httpDriver.run", () => {
     if (result.status !== "success") {
       throw new Error(`expected success, received ${result.status}`);
     }
-    const htmlContent = result.data.page.contents.find((item) => item.format === "html");
+    const htmlContent = result.data.page.contents.find(
+      (item) => item.format === "html",
+    );
     expect(htmlContent?.body).toBe("Hello World");
   });
 
   it("returns failure when fetch responds with non-2xx status", async () => {
-    global.fetch = vi
-      .fn()
-      .mockResolvedValue(buildHtmlResponse("boom", { status: 500, statusText: "Internal Server Error" }));
+    global.fetch = vi.fn().mockResolvedValue(
+      buildHtmlResponse("boom", {
+        status: 500,
+        statusText: "Internal Server Error",
+      }),
+    );
 
     const { httpDriver } = await loadDriver();
     const job: ScrapeJob = createHttpJob({
@@ -187,25 +203,27 @@ describe("httpDriver.run", () => {
       }
     }
 
-    (globalThis as any).AbortController = TestAbortController;
+    mutableGlobal.AbortController = TestAbortController;
 
     try {
-      global.fetch = vi.fn().mockImplementation((_url, init: RequestInit | undefined) => {
-        return new Promise((_resolve, reject) => {
-          const signal = init?.signal;
-          if (signal) {
-            const abortHandler = () => reject(new Error("aborted"));
-            signal.addEventListener("abort", abortHandler, { once: true });
-            if ("onabort" in signal) {
-              const original = signal.onabort;
-              signal.onabort = (...args: unknown[]) => {
-                abortHandler();
-                return original?.apply(signal, args as never);
-              };
+      global.fetch = vi
+        .fn()
+        .mockImplementation((_url, init: RequestInit | undefined) => {
+          return new Promise((_resolve, reject) => {
+            const signal = init?.signal;
+            if (signal) {
+              const abortHandler = () => reject(new Error("aborted"));
+              signal.addEventListener("abort", abortHandler, { once: true });
+              if ("onabort" in signal) {
+                const original = signal.onabort;
+                signal.onabort = (...args: unknown[]) => {
+                  abortHandler();
+                  return original?.apply(signal, args as never);
+                };
+              }
             }
-          }
+          });
         });
-      });
 
       const { httpDriver } = await loadDriver();
       const job: ScrapeJob = createHttpJob({
@@ -235,7 +253,7 @@ describe("httpDriver.run", () => {
       }
       expect(result.errors[0].message.toLowerCase()).toContain("aborted");
     } finally {
-      (globalThis as any).AbortController = originalAbortController;
+      mutableGlobal.AbortController = originalAbortController;
       vi.useRealTimers();
     }
   });
@@ -245,7 +263,9 @@ describe("verifyHttpDriver", () => {
   it("throws when healthcheck is not ok", async () => {
     global.fetch = vi
       .fn()
-      .mockResolvedValue(buildHtmlResponse("", { status: 502, statusText: "Bad Gateway" }));
+      .mockResolvedValue(
+        buildHtmlResponse("", { status: 502, statusText: "Bad Gateway" }),
+      );
 
     const { verifyHttpDriver } = await loadDriver();
 

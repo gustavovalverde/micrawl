@@ -36,6 +36,7 @@ import type {
 } from "../../types/scrape-driver.js";
 
 import { buildExtraHeaders } from "./shared.js";
+
 export { buildExtraHeaders } from "./shared.js";
 
 const generateUserAgent = () =>
@@ -443,10 +444,7 @@ export const runPlaywrightScrape = async (
           extract: { readability: job.readability ?? true },
           markdown: { linkStyle: "inline" },
         });
-        const markdownResult = await parser.process(
-          payloadBody,
-          job.targetUrl,
-        );
+        const markdownResult = await parser.process(payloadBody, job.targetUrl);
         markdownBody = markdownResult.markdown;
         contents.push({
           format: "markdown",

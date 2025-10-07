@@ -1,28 +1,36 @@
 import { randomUUID } from "node:crypto";
 import { zValidator } from "@hono/zod-validator";
-import type { Hono } from "hono";
-import { stream } from "hono/streaming";
-import { z } from "zod";
-import { getEnv } from "./config/index.js";
-import { logger } from "./logger.js";
-import { runScrapeJob, verifyChromiumLaunch, resolveDriverName, canonicalizeUrl, UrlNormalizationError } from "./scraper.js";
 import type {
   ContentFormat,
+  ScrapeDriverName,
   ScrapeError,
   ScrapeErrorDetail,
   ScrapeJob,
   ScrapePhase,
   ScrapeProgressUpdate,
   ScrapeSummary,
-  ScrapeDriverName,
 } from "@micrawl/core/types";
+import type { Hono } from "hono";
+import { stream } from "hono/streaming";
+import { z } from "zod";
+import { getEnv } from "./config/index.js";
+import { logger } from "./logger.js";
+import {
+  canonicalizeUrl,
+  resolveDriverName,
+  runScrapeJob,
+  UrlNormalizationError,
+  verifyChromiumLaunch,
+} from "./scraper.js";
 
 const runtimeConfig = getEnv();
 
 const SUPPORTED_OUTPUT_FORMATS = ["html", "markdown"] as const;
 const _OUTPUT_FORMAT_SET = new Set<ContentFormat>(SUPPORTED_OUTPUT_FORMATS);
 
-const driverValueSchema = z.enum(["playwright", "http", "auto"]).catch(runtimeConfig.SCRAPER_DEFAULT_DRIVER);
+const driverValueSchema = z
+  .enum(["playwright", "http", "auto"])
+  .catch(runtimeConfig.SCRAPER_DEFAULT_DRIVER);
 
 const outputFormatValueSchema = z.preprocess(
   (value) => (typeof value === "string" ? value.trim().toLowerCase() : value),
@@ -268,7 +276,8 @@ export const registerRoutes = (app: Hono) => {
           const driverName = resolveDriverName(job);
 
           const tallyDriver = () => {
-            summary.drivers[driverName] = (summary.drivers[driverName] ?? 0) + 1;
+            summary.drivers[driverName] =
+              (summary.drivers[driverName] ?? 0) + 1;
           };
 
           const captureProgressSnapshot = (completedCount: number) => ({

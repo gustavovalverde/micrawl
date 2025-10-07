@@ -1,5 +1,3 @@
-import { testClient } from "hono/testing";
-import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   ScrapeError,
   ScrapeFailure,
@@ -8,10 +6,15 @@ import type {
   ScrapeSuccess,
   ScrapeSummary,
 } from "@micrawl/core/types";
+import { testClient } from "hono/testing";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock the scraper module with functions directly in the factory
 vi.mock("../src/scraper.js", async () => {
-  const actual = await vi.importActual<typeof import("../src/scraper.js")>("../src/scraper.js");
+  const actual =
+    await vi.importActual<typeof import("../src/scraper.js")>(
+      "../src/scraper.js",
+    );
   return {
     ...actual,
     runScrapeJob: vi.fn(),

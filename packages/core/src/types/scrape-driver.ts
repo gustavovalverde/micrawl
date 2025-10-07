@@ -1,4 +1,9 @@
-import type { ScrapeJob, ScrapePhase, ScrapeSuccess, ScrapeFailure } from "./scrape.js";
+import type {
+  ScrapeFailure,
+  ScrapeJob,
+  ScrapePhase,
+  ScrapeSuccess,
+} from "./scrape.js";
 
 export interface ScrapeDriverPosition {
   index: number;
@@ -9,7 +14,7 @@ export interface ScrapeDriverPosition {
 export type ScrapeDriverResult = ScrapeSuccess | ScrapeFailure;
 
 export type ScrapeDriverPhaseEmitter = (
-  phase: Exclude<ScrapePhase, "completed">
+  phase: Exclude<ScrapePhase, "completed">,
 ) => Promise<void> | void;
 
 export interface ScrapeDriver {

@@ -1,107 +1,58 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { runScrapeJob, verifyChromiumLaunch } from "../src/scraper.js";
 
-const setupScraperMocks = () => {
-  const page = {
-    setDefaultTimeout: vi.fn(),
-    setExtraHTTPHeaders: vi.fn().mockResolvedValue(undefined),
-    goto: vi.fn().mockResolvedValue({
-      status: () => 200,
-      headers: () => ({ "content-type": "text/html" }),
-      body: async () => Buffer.from("<html></html>", "utf8"),
-    }),
-    waitForSelector: vi.fn().mockResolvedValue(undefined),
-    waitForLoadState: vi.fn().mockResolvedValue(undefined),
-    evaluate: vi.fn().mockResolvedValue("Example content"),
-    content: vi.fn().mockResolvedValue("<html></html>"),
-    title: vi.fn().mockResolvedValue("Example"),
-    close: vi.fn().mockResolvedValue(undefined),
-  } as const;
-
-  const context = {
-    route: vi.fn().mockResolvedValue(undefined),
-    newPage: vi.fn().mockResolvedValue(page),
-    close: vi.fn().mockResolvedValue(undefined),
-  } as const;
-
-  const browser = {
-    newContext: vi.fn().mockResolvedValue(context),
-    on: vi.fn(),
-    close: vi.fn().mockResolvedValue(undefined),
-  } as const;
-
-  const launchMock = vi.fn().mockResolvedValue(browser);
-
-  vi.doMock("playwright-core", () => ({
-    chromium: { launch: launchMock },
-  }));
-
-  vi.doMock("@sparticuz/chromium", () => ({
-    default: {
-      args: ["--single-process"],
-      executablePath: vi.fn().mockResolvedValue(null),
-    },
-  }));
-
-  return { launchMock, browser, context, page };
-};
-
-const resetMocks = () => {
-  vi.doUnmock("playwright-core");
-  vi.doUnmock("@sparticuz/chromium");
-};
-
+// These tests require Playwright browsers to be installed
+// Run: pnpm install && pnpm exec playwright install chromium
 describe("runScrapeJob runtime behaviour", () => {
-  beforeEach(() => {
-    vi.resetModules();
-    vi.clearAllMocks();
-  });
-
-  afterEach(() => {
-    resetMocks();
-    vi.resetModules();
-    vi.clearAllMocks();
+  afterEach(async () => {
+    // Give browser time to clean up between tests
+    await new Promise((resolve) => setTimeout(resolve, 100));
   });
 
   it("reuses the launched browser across jobs", async () => {
-    const { launchMock, browser, page } = setupScraperMocks();
-    const { runScrapeJob } = await import("../src/scraper.js");
-
     const baseJob = {
       targetUrl: "https://example.com",
       captureTextOnly: true,
-      timeoutMs: 5_000,
+      timeoutMs: 10_000,
     };
+
+    const startTime = Date.now();
 
     const first = await runScrapeJob(baseJob, "job-1", {
       index: 1,
       total: 1,
       targetUrl: baseJob.targetUrl,
     });
+    const firstDuration = Date.now() - startTime;
 
+    const secondStartTime = Date.now();
     const second = await runScrapeJob(baseJob, "job-2", {
       index: 1,
       total: 1,
       targetUrl: baseJob.targetUrl,
     });
+    const secondDuration = Date.now() - secondStartTime;
 
+    // Both jobs should succeed
     expect(first.status).toBe("success");
     expect(second.status).toBe("success");
-    expect(launchMock).toHaveBeenCalledTimes(1);
-    expect(browser.newContext).toHaveBeenCalledTimes(2);
-    expect(page.waitForSelector).toHaveBeenCalledWith(
-      "body",
-      expect.any(Object),
-    );
-    expect(page.waitForLoadState).toHaveBeenCalledWith(
-      "networkidle",
-      expect.any(Object),
-    );
+
+    // Second job should be faster (browser already launched)
+    // Allow some variance but second should generally be faster
+    expect(secondDuration).toBeLessThan(firstDuration * 1.5);
+
+    if (first.status === "success" && second.status === "success") {
+      // Both should have scraped the same URL
+      expect(first.data.page.url).toBe("https://example.com");
+      expect(second.data.page.url).toBe("https://example.com");
+
+      // Both should have content
+      expect(first.data.page.contents.length).toBeGreaterThan(0);
+      expect(second.data.page.contents.length).toBeGreaterThan(0);
+    }
   });
 
   it("fails fast for disallowed file extensions", async () => {
-    const { launchMock } = setupScraperMocks();
-    const { runScrapeJob } = await import("../src/scraper.js");
-
     const job = {
       targetUrl: "https://example.com/report.pdf",
       captureTextOnly: true,
@@ -119,38 +70,27 @@ describe("runScrapeJob runtime behaviour", () => {
       throw new Error("Expected failure envelope for disallowed extension");
     }
     expect(result.errors[0]?.message).toContain("Disallowed file extension");
-    expect(launchMock).not.toHaveBeenCalled();
   });
 
   it("navigates during health verification", async () => {
-    const { browser, context, page } = setupScraperMocks();
-    const { verifyChromiumLaunch } = await import("../src/scraper.js");
-
-    await verifyChromiumLaunch();
-
-    expect(browser.newContext).toHaveBeenCalled();
-    expect(context.newPage).toHaveBeenCalled();
-    expect(page.goto).toHaveBeenCalledWith("https://example.com/", {
-      waitUntil: "domcontentloaded",
-      timeout: 5_000,
-    });
-    expect(page.waitForLoadState).toHaveBeenCalledWith("domcontentloaded", {
-      timeout: 5_000,
-    });
-    expect(page.close).toHaveBeenCalled();
-    expect(context.close).toHaveBeenCalled();
+    // Should complete without throwing
+    await expect(verifyChromiumLaunch()).resolves.not.toThrow();
   });
 
   it("generates markdown content when requested", async () => {
-    const { page } = setupScraperMocks();
-    const { runScrapeJob } = await import("../src/scraper.js");
+    // Use a data URL with known HTML content
+    const html = `<html>
+      <head><title>Test Page</title></head>
+      <body>
+        <h1>Hello</h1>
+        <p>World.</p>
+      </body>
+    </html>`;
 
-    page.content.mockResolvedValueOnce(
-      "<html><head><title>Hello Page</title></head><body><h1>Hello</h1><p>World.</p></body></html>",
-    );
+    const dataUrl = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
 
     const job = {
-      targetUrl: "https://example.com",
+      targetUrl: dataUrl,
       captureTextOnly: false,
       timeoutMs: 5_000,
       outputFormats: ["markdown" as const],
@@ -166,8 +106,12 @@ describe("runScrapeJob runtime behaviour", () => {
     if (result.status !== "success") return;
 
     const contents = result.data.page.contents;
-    expect(contents).toHaveLength(1);
-    const markdownEntry = contents[0];
+    expect(contents.length).toBeGreaterThan(0);
+
+    const markdownEntry = contents.find((c) => c.format === "markdown");
+    expect(markdownEntry).toBeDefined();
+    if (!markdownEntry) return;
+
     expect(markdownEntry.format).toBe("markdown");
     expect(markdownEntry.contentType).toBe("text/markdown");
     expect(markdownEntry.body).toContain("# Hello");

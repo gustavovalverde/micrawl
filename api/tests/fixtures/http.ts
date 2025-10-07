@@ -11,7 +11,9 @@ export const buildHtmlResponse = (body: string, init: ResponseInit = {}) =>
     ...init,
   });
 
-export const createHttpJob = (overrides: Partial<ScrapeJob> = {}): ScrapeJob => ({
+export const createHttpJob = (
+  overrides: Partial<ScrapeJob> = {},
+): ScrapeJob => ({
   targetUrl: "https://example.com",
   captureTextOnly: true,
   timeoutMs: 5_000,
